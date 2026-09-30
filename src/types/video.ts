@@ -213,6 +213,11 @@ export interface AllInOnePlan {
     startSec: number;
     endSec: number;
   };
+  clipTrims?: Array<{
+    clipIndex: number;
+    startSec: number;
+    endSec: number;
+  }>;
   watermark?: {
     enabled: boolean;
     method: 'blur' | 'cover' | 'delogo';

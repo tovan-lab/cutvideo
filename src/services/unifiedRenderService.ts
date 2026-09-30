@@ -355,6 +355,7 @@ export class UnifiedRenderService {
             endSec: trim.endSec,
           }
         : undefined,
+      clipTrims: plan.clipTrims,
       watermark: watermark?.enabled
         ? {
             enabled: true,

@@ -353,6 +353,47 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
     }
   };
 
+  const handleApplyToAllInOne = () => {
+    if (activeTool === 'trim' && currentVideo) {
+      setMergeItems((prev) =>
+        prev.map((it) =>
+          it.video.id === currentVideo.id ? { ...it, trimConfig: { ...trimConfig } } : it
+        )
+      );
+      onShowToast('✅ Đã lưu đoạn cắt và cập nhật vào Trọn Gói 1 Lần!', 'success');
+      setActiveTool('unified');
+    } else if (activeTool === 'watermark') {
+      onShowToast('✅ Đã lưu vùng xóa logo và cập nhật vào Trọn Gói 1 Lần!', 'success');
+      setActiveTool('unified');
+    } else if (activeTool === 'text') {
+      const valid = textItems.filter((t) => t.text.trim().length > 0);
+      onShowToast(`✅ Đã lưu ${valid.length} lớp chữ và cập nhật vào Trọn Gói 1 Lần!`, 'success');
+      setActiveTool('unified');
+    } else if (activeTool === 'merge') {
+      onShowToast(`✅ Đã lưu danh sách ghép ${mergeItems.length} video vào Trọn Gói 1 Lần!`, 'success');
+      setActiveTool('unified');
+    }
+  };
+
+  const handleVideoEnded = () => {
+    if (mergeItems.length > 1 && currentVideo) {
+      const currentIndex = mergeItems.findIndex((it) => it.video.id === currentVideo.id);
+      if (currentIndex !== -1 && currentIndex < mergeItems.length - 1) {
+        const nextItem = mergeItems[currentIndex + 1];
+        onSelectVideo(nextItem.video);
+        if (nextItem.trimConfig) {
+          setTrimConfig(nextItem.trimConfig);
+        } else {
+          setTrimConfig({ startTime: 0, endTime: nextItem.video.metadata.duration || 5 });
+        }
+        setTimeout(() => {
+          playerRef.current?.seekTo(nextItem.trimConfig ? nextItem.trimConfig.startTime : 0);
+          playerRef.current?.play();
+        }, 100);
+      }
+    }
+  };
+
   const tools: Array<{ id: ToolType; label: string; desc: string; icon: React.ReactNode }> = [
     {
       id: 'unified',
@@ -470,6 +511,7 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
                 ref={playerRef}
                 video={currentVideo}
                 onTimeUpdate={(t) => setCurrentTime(t)}
+                onEnded={handleVideoEnded}
                 highlightRange={
                   activeTool === 'trim'
                     ? { start: trimConfig.startTime, end: trimConfig.endTime }
@@ -520,6 +562,81 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
                   ) : undefined
                 }
               />
+
+              {/* Sequential Playlist Bar for All Uploaded Videos */}
+              {mergeItems.length > 1 && (
+                <div className="p-3 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-2 shadow-lg">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Layers className="w-3.5 h-3.5 text-indigo-400" />
+                      <span className="text-xs font-bold text-white">
+                        Danh sách video đã tải ({mergeItems.length} video):
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsPreviewModalOpen(true)}
+                      className="flex items-center gap-1 text-[11px] font-bold text-amber-400 hover:text-amber-300 bg-amber-950/40 border border-amber-500/30 px-2 py-0.5 rounded-lg transition-colors"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      <span>Xem toàn chuỗi</span>
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
+                    {mergeItems.map((item, idx) => {
+                      const isCurrent = currentVideo.id === item.video.id;
+                      const isTrimmed =
+                        item.trimConfig &&
+                        (item.trimConfig.startTime > 0 ||
+                          item.trimConfig.endTime < item.video.metadata.duration);
+                      const effDur =
+                        isTrimmed && item.trimConfig
+                          ? item.trimConfig.endTime - item.trimConfig.startTime
+                          : item.video.metadata.duration;
+
+                      return (
+                        <div key={item.video.id || idx} className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onSelectVideo(item.video);
+                              if (item.trimConfig) {
+                                setTrimConfig(item.trimConfig);
+                              } else {
+                                setTrimConfig({
+                                  startTime: 0,
+                                  endTime: item.video.metadata.duration || 5,
+                                });
+                              }
+                            }}
+                            className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                              isCurrent
+                                ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-md shadow-indigo-600/30 ring-1 ring-indigo-400'
+                                : 'bg-slate-900/90 text-slate-300 hover:bg-slate-800 hover:text-white border border-slate-800'
+                            }`}
+                          >
+                            <span className="w-4 h-4 rounded-md bg-black/40 text-[10px] font-bold flex items-center justify-center shrink-0">
+                              {idx + 1}
+                            </span>
+                            <div className="text-left min-w-0">
+                              <p className="truncate max-w-[120px] text-xs font-medium">
+                                {item.video.name}
+                              </p>
+                              <p className="text-[10px] opacity-75 font-mono">
+                                {isTrimmed ? `✂️ ${effDur.toFixed(1)}s` : `${effDur.toFixed(1)}s`}
+                              </p>
+                            </div>
+                          </button>
+                          {idx < mergeItems.length - 1 && (
+                            <span className="text-slate-600 text-xs font-bold">➔</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Right/Bottom: Tool Controls & Quality (5 Cols on desktop) */}
@@ -547,6 +664,16 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
                   }}
                   onSwitchToolTab={(tool) => setActiveTool(tool)}
                   onOpenPreviewModal={() => setIsPreviewModalOpen(true)}
+                  onSelectVideoForEditing={(v) => {
+                    onSelectVideo(v);
+                    const item = mergeItems.find((m) => m.video.id === v.id);
+                    if (item?.trimConfig) {
+                      setTrimConfig(item.trimConfig);
+                    } else {
+                      setTrimConfig({ startTime: 0, endTime: v.metadata.duration || 5 });
+                    }
+                  }}
+                  onAddFiles={handleAddMergeFiles}
                   isProcessing={isProcessing}
                 />
               )}
@@ -563,14 +690,77 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
               )}
 
               {activeTool === 'trim' && (
-                <TrimControls
-                  duration={currentVideo.metadata.duration}
-                  trimConfig={trimConfig}
-                  currentTime={currentTime}
-                  onChange={setTrimConfig}
-                  onPreviewTrim={handlePreviewTrim}
-                  onSeekTo={(t) => playerRef.current?.seekTo(t)}
-                />
+                <div className="space-y-3">
+                  {mergeItems.length > 1 && (
+                    <div className="p-3 bg-slate-900/80 rounded-xl border border-indigo-500/30">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-semibold text-indigo-300 flex items-center gap-1.5">
+                          <Scissors className="w-3.5 h-3.5" />
+                          Chọn clip cần cắt (trong chuỗi {mergeItems.length} video):
+                        </span>
+                        <span className="text-[11px] text-slate-400">
+                          {mergeItems.findIndex((m) => m.video.id === currentVideo.id) + 1}/{mergeItems.length}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                        {mergeItems.map((item, idx) => {
+                          const isSelected = item.video.id === currentVideo.id;
+                          const hasTrim = !!item.trimConfig;
+                          return (
+                            <button
+                              key={item.id}
+                              type="button"
+                              onClick={() => {
+                                setMergeItems((prev) =>
+                                  prev.map((it) =>
+                                    it.video.id === currentVideo.id ? { ...it, trimConfig: { ...trimConfig } } : it
+                                  )
+                                );
+                                onSelectVideo(item.video);
+                                if (item.trimConfig) {
+                                  setTrimConfig(item.trimConfig);
+                                } else {
+                                  setTrimConfig({ startTime: 0, endTime: item.video.metadata.duration || 5 });
+                                }
+                              }}
+                              className={`p-2 rounded-lg text-left text-xs border transition-all ${
+                                isSelected
+                                  ? 'bg-indigo-600/30 border-indigo-500 text-white font-medium ring-1 ring-indigo-500'
+                                  : 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:border-slate-500'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="font-bold text-[11px] text-indigo-400">#{idx + 1}</span>
+                                {hasTrim && (
+                                  <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-1 rounded font-mono">
+                                    ✂️ {item.trimConfig!.startTime.toFixed(1)}s-{item.trimConfig!.endTime.toFixed(1)}s
+                                  </span>
+                                )}
+                              </div>
+                              <p className="truncate text-[11px] mt-0.5">{item.video.name}</p>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <TrimControls
+                    duration={currentVideo.metadata.duration}
+                    trimConfig={trimConfig}
+                    currentTime={currentTime}
+                    onChange={(newTrim) => {
+                      setTrimConfig(newTrim);
+                      setMergeItems((prev) =>
+                        prev.map((it) =>
+                          it.video.id === currentVideo.id ? { ...it, trimConfig: newTrim } : it
+                        )
+                      );
+                    }}
+                    onPreviewTrim={handlePreviewTrim}
+                    onSeekTo={(t) => playerRef.current?.seekTo(t)}
+                  />
+                </div>
               )}
 
               {activeTool === 'merge' && (
@@ -580,7 +770,12 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
                   onAddFiles={handleAddMergeFiles}
                   onSelectPreview={(v) => {
                     onSelectVideo(v);
-                    setTrimConfig({ startTime: 0, endTime: v.metadata.duration || 5 });
+                    const item = mergeItems.find((m) => m.video.id === v.id);
+                    if (item?.trimConfig) {
+                      setTrimConfig(item.trimConfig);
+                    } else {
+                      setTrimConfig({ startTime: 0, endTime: v.metadata.duration || 5 });
+                    }
                   }}
                   selectedPreviewId={currentVideo.id}
                   autoTransitions={autoTransitions}
@@ -603,27 +798,37 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
                 onChange={onChangeQuality}
               />
 
-              {/* Primary Processing Action Button for non-unified tools */}
+              {/* Dual Action Buttons for non-unified tools */}
               {activeTool !== 'unified' && (
-                <button
-                  type="button"
-                  onClick={handleProcessVideo}
-                  className="w-full min-h-[48px] flex items-center justify-center gap-2.5 py-3 px-6 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm shadow-xl shadow-indigo-900/30 transition-all hover:scale-[1.01] active:scale-[0.99]"
-                >
-                  <Play className="w-4 h-4 fill-white" />
-                  <span>
-                    {activeTool === 'trim' && 'Tiến hành Cắt Video'}
-                    {activeTool === 'merge' && `Ghép ${mergeItems.length} Video với Chuyển Cảnh`}
-                    {activeTool === 'text' && 'Xuất Video Có Lớp Chữ Chuyên Nghiệp'}
-                    {activeTool === 'watermark' &&
-                      (watermarkConfig.method === 'cover'
-                        ? 'Bắt đầu Che phủ Logo / Object'
-                        : watermarkConfig.method === 'ai_inpaint'
-                        ? 'Chạy AI Inpainting (Cần AI Engine)'
-                        : 'Bắt đầu Làm mờ Logo / Object')}
-                  </span>
-                  <ArrowRight className="w-4 h-4 ml-1" />
-                </button>
+                <div className="space-y-2 pt-1">
+                  {/* Primary CTA: Đồng Ý & Đưa Vào Trọn Gói 1 Lần (No download, switches to All-in-One overview) */}
+                  <button
+                    type="button"
+                    onClick={handleApplyToAllInOne}
+                    className="w-full min-h-[50px] flex items-center justify-center gap-2.5 py-3.5 px-6 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 hover:from-emerald-500 hover:to-indigo-500 text-white font-semibold text-sm shadow-xl shadow-emerald-950/40 transition-all hover:scale-[1.01] active:scale-[0.99] border border-emerald-400/30"
+                  >
+                    <CheckCircle className="w-5 h-5 text-emerald-300 shrink-0" />
+                    <span>
+                      Đồng Ý &amp; Đưa Vào &quot;Trọn Gói 1 Lần&quot; (Xem Tổng Quan)
+                    </span>
+                    <Sparkles className="w-4 h-4 text-amber-300 ml-0.5" />
+                  </button>
+
+                  {/* Secondary CTA: Xuất riêng lẻ ngay (Optional download for this single tool) */}
+                  <button
+                    type="button"
+                    onClick={handleProcessVideo}
+                    className="w-full min-h-[40px] flex items-center justify-center gap-2 py-2 px-4 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 hover:text-white font-medium text-xs border border-slate-700/60 transition-all"
+                  >
+                    <Play className="w-3.5 h-3.5 fill-slate-400" />
+                    <span>
+                      {activeTool === 'trim' && 'Hoặc tải riêng đoạn cắt này ngay (không gộp)'}
+                      {activeTool === 'merge' && `Hoặc tải riêng video ghép này ngay`}
+                      {activeTool === 'text' && 'Hoặc tải riêng video kèm chữ này ngay'}
+                      {activeTool === 'watermark' && 'Hoặc tải riêng video xóa logo này ngay'}
+                    </span>
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -654,6 +859,7 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
           videos={
             mergeItems.length > 0 ? mergeItems.map((m) => m.video) : [currentVideo]
           }
+          mergeItems={mergeItems}
           trimConfig={trimConfig}
           enableTrim={activeTool === 'trim' || activeTool === 'unified'}
           watermarkConfig={watermarkConfig}
@@ -663,6 +869,23 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
           mergeEnabled={mergeItems.length > 1}
           autoTransitions={autoTransitions}
           onConfirmExport={() => {
+            const clipTrims =
+              mergeItems.length > 1
+                ? mergeItems
+                    .map((item, idx) => ({
+                      clipIndex: idx,
+                      startSec: item.trimConfig?.startTime ?? 0,
+                      endSec: item.trimConfig?.endTime ?? item.video.metadata.duration ?? 0,
+                    }))
+                    .filter(
+                      (ct) =>
+                        ct.startSec > 0 ||
+                        (ct.endSec > 0 &&
+                          ct.endSec <
+                            (mergeItems[ct.clipIndex]?.video.metadata.duration || 999999))
+                    )
+                : undefined;
+
             const plan: AllInOnePlan = {
               videos:
                 mergeItems.length > 1
@@ -673,6 +896,7 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
                 startSec: trimConfig.startTime,
                 endSec: trimConfig.endTime,
               },
+              clipTrims: clipTrims && clipTrims.length > 0 ? clipTrims : undefined,
               watermark: {
                 enabled: true,
                 method:

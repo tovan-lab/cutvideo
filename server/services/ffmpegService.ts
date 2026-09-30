@@ -97,6 +97,11 @@ export interface ServerAllInOneOptions {
     startSec: number;
     endSec: number;
   };
+  clipTrims?: Array<{
+    clipIndex: number;
+    startSec: number;
+    endSec: number;
+  }>;
   watermark?: {
     enabled: boolean;
     method: 'delogo' | 'blur' | 'cover';
@@ -837,6 +842,7 @@ export class ServerFFmpegService {
       inputPaths,
       outputPath,
       trim,
+      clipTrims,
       watermark,
       textItems = [],
       merge,
@@ -1001,6 +1007,11 @@ export class ServerFFmpegService {
         const filterComplex: string[] = [];
 
         for (let i = 0; i < inputPaths.length; i++) {
+          const cTrim = clipTrims?.find((ct) => ct.clipIndex === i);
+          if (cTrim && cTrim.endSec > cTrim.startSec) {
+            probes[i].duration = cTrim.endSec - cTrim.startSec;
+            args.push('-ss', cTrim.startSec.toString(), '-to', cTrim.endSec.toString());
+          }
           args.push('-i', inputPaths[i]);
           filterComplex.push(
             `[${i}:v]scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30[v${i}]`

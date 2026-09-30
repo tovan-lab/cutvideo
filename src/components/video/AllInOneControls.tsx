@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Sparkles,
   Scissors,
@@ -12,6 +12,10 @@ import {
   Zap,
   Sliders,
   ExternalLink,
+  ArrowUp,
+  ArrowDown,
+  Trash2,
+  Film,
 } from 'lucide-react';
 import {
   AllInOnePlan,
@@ -43,6 +47,8 @@ interface AllInOneControlsProps {
   onPreviewTrim: (startSec: number, endSec: number) => void;
   onSwitchToolTab: (tool: ToolType) => void;
   onOpenPreviewModal: () => void;
+  onSelectVideoForEditing?: (video: VideoItem) => void;
+  onAddFiles?: (files: FileList) => void;
   isProcessing: boolean;
 }
 
@@ -63,6 +69,8 @@ export const AllInOneControls: React.FC<AllInOneControlsProps> = ({
   onPreviewTrim,
   onSwitchToolTab,
   onOpenPreviewModal,
+  onSelectVideoForEditing,
+  onAddFiles,
   isProcessing,
 }) => {
   const duration = currentVideo.metadata.duration || 10;
@@ -134,9 +142,54 @@ export const AllInOneControls: React.FC<AllInOneControlsProps> = ({
     setEnableText(true);
   };
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleMoveClip = (index: number, direction: -1 | 1) => {
+    const newItems = [...mergeItems];
+    const targetIdx = index + direction;
+    if (targetIdx < 0 || targetIdx >= newItems.length) return;
+    const temp = newItems[index];
+    newItems[index] = newItems[targetIdx];
+    newItems[targetIdx] = temp;
+    const updated = newItems.map((item, idx) => ({ ...item, order: idx }));
+    onChangeMergeItems(updated);
+  };
+
+  const handleRemoveClip = (index: number) => {
+    if (mergeItems.length <= 1) return;
+    const newItems = mergeItems.filter((_, idx) => idx !== index);
+    const updated = newItems.map((item, idx) => ({ ...item, order: idx }));
+    onChangeMergeItems(updated);
+  };
+
+  const handleCutSpecificClip = (video: VideoItem) => {
+    onSelectVideoForEditing?.(video);
+    onSwitchToolTab('trim');
+  };
+
   const handleRunAllInOne = () => {
     const videosToRender =
       enableMerge && mergeItems.length > 0 ? mergeItems.map((m) => m.video) : [currentVideo];
+
+    const clipTrims =
+      enableMerge && mergeItems.length > 1
+        ? mergeItems
+            .map((item, idx) => {
+              if (
+                item.trimConfig &&
+                (item.trimConfig.startTime > 0 ||
+                  item.trimConfig.endTime < item.video.metadata.duration)
+              ) {
+                return {
+                  clipIndex: idx,
+                  startSec: item.trimConfig.startTime,
+                  endSec: item.trimConfig.endTime,
+                };
+              }
+              return null;
+            })
+            .filter((t): t is { clipIndex: number; startSec: number; endSec: number } => t !== null)
+        : undefined;
 
     const plan: AllInOnePlan = {
       videos: videosToRender,
@@ -147,6 +200,7 @@ export const AllInOneControls: React.FC<AllInOneControlsProps> = ({
             endSec: trimConfig.endTime,
           }
         : undefined,
+      clipTrims: clipTrims && clipTrims.length > 0 ? clipTrims : undefined,
       watermark: enableWatermark
         ? {
             enabled: true,
@@ -408,7 +462,7 @@ export const AllInOneControls: React.FC<AllInOneControlsProps> = ({
         </div>
 
         {enableMerge && (
-          <div className="mt-3 pt-2.5 border-t border-slate-800/80 space-y-2">
+          <div className="mt-3 pt-2.5 border-t border-slate-800/80 space-y-2.5">
             <div className="flex items-center justify-between text-xs">
               <span className="text-[11px] text-slate-300 font-medium">
                 Chuyển cảnh thông minh (Auto Transitions):
@@ -418,18 +472,138 @@ export const AllInOneControls: React.FC<AllInOneControlsProps> = ({
                 onClick={() => onToggleAutoTransitions(!autoTransitions)}
                 className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
                   autoTransitions
-                    ? 'bg-indigo-600 text-white'
+                    ? 'bg-indigo-600 text-white shadow-sm'
                     : 'bg-slate-800 text-slate-400'
                 }`}
               >
                 {autoTransitions ? 'BẬT (Mượt mà)' : 'TẮT'}
               </button>
             </div>
-            {mergeItems.length < 2 && (
-              <p className="text-[10px] text-amber-400 bg-amber-950/30 p-2 rounded-xl border border-amber-500/20">
-                💡 Hiện có 1 video. Nhấn nút <strong>"Quản lý clip"</strong> ở trên để thêm video thứ 2, thứ 3 vào danh sách ghép.
-              </p>
-            )}
+
+            {/* Hidden file input for adding clips directly */}
+            <input
+              type="file"
+              ref={fileInputRef}
+              multiple
+              accept="video/*"
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files && e.target.files.length > 0) {
+                  onAddFiles?.(e.target.files);
+                  e.target.value = '';
+                }
+              }}
+            />
+
+            {/* Ordered List of Clips */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-[11px] text-slate-400">
+                <span className="font-semibold text-slate-300">
+                  Thứ tự phát ({mergeItems.length} video):
+                </span>
+                <span className="text-[10px] text-slate-500">Đoạn trước ➔ Đoạn sau</span>
+              </div>
+
+              {mergeItems.map((item, idx) => {
+                const isFirst = idx === 0;
+                const isLast = idx === mergeItems.length - 1;
+                const isTrimmed =
+                  item.trimConfig &&
+                  (item.trimConfig.startTime > 0 ||
+                    item.trimConfig.endTime < item.video.metadata.duration);
+                const effectiveDur = isTrimmed && item.trimConfig
+                  ? item.trimConfig.endTime - item.trimConfig.startTime
+                  : item.video.metadata.duration;
+
+                return (
+                  <div
+                    key={item.video.id || idx}
+                    className="p-2 rounded-xl bg-slate-950/70 border border-slate-800 flex items-center justify-between gap-2 text-xs hover:border-slate-700 transition-all"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-5 h-5 rounded-md bg-indigo-600/30 text-indigo-300 font-bold flex items-center justify-center text-[10px] shrink-0 border border-indigo-500/30">
+                        #{idx + 1}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <p className="font-semibold text-white truncate max-w-[140px] sm:max-w-[170px]">
+                            {item.video.name}
+                          </p>
+                          {isFirst && (
+                            <span className="text-[9px] px-1.5 py-0.2 bg-emerald-500/20 text-emerald-300 rounded font-medium shrink-0">
+                              Đầu tiên
+                            </span>
+                          )}
+                          {isLast && mergeItems.length > 1 && (
+                            <span className="text-[9px] px-1.5 py-0.2 bg-amber-500/20 text-amber-300 rounded font-medium shrink-0">
+                              Cuối cùng
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-slate-400 flex items-center gap-1">
+                          {isTrimmed && item.trimConfig ? (
+                            <span className="text-amber-300 font-medium">
+                              ✂️ Đã cắt: {effectiveDur.toFixed(1)}s (gốc {item.video.metadata.duration.toFixed(1)}s)
+                            </span>
+                          ) : (
+                            <span>{effectiveDur.toFixed(1)}s • {item.video.metadata.width}x{item.video.metadata.height}</span>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <button
+                        type="button"
+                        disabled={isFirst}
+                        onClick={() => handleMoveClip(idx, -1)}
+                        title="Đưa video lên trước"
+                        className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white disabled:opacity-20 disabled:hover:bg-transparent"
+                      >
+                        <ArrowUp className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isLast}
+                        onClick={() => handleMoveClip(idx, 1)}
+                        title="Đưa video xuống sau"
+                        className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white disabled:opacity-20 disabled:hover:bg-transparent"
+                      >
+                        <ArrowDown className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleCutSpecificClip(item.video)}
+                        title="Cắt đoạn cho video này (bỏ intro/outro)"
+                        className="p-1 rounded-lg hover:bg-indigo-950 text-indigo-400 hover:text-indigo-300"
+                      >
+                        <Scissors className="w-3.5 h-3.5" />
+                      </button>
+                      {mergeItems.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveClip(idx)}
+                          title="Xóa khỏi danh sách ghép"
+                          className="p-1 rounded-lg hover:bg-rose-950/60 text-slate-500 hover:text-rose-400"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Inline Add Video Button */}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-slate-950 hover:bg-slate-900 border border-dashed border-indigo-500/30 text-indigo-300 hover:text-white text-xs font-semibold transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Thêm video vào danh sách ghép</span>
+            </button>
           </div>
         )}
       </div>

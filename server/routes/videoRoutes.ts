@@ -294,6 +294,7 @@ videoRouter.post(
         inputPaths,
         outputPath,
         trim: options.trim,
+        clipTrims: options.clipTrims,
         watermark: options.watermark,
         textItems: options.textItems,
         merge: options.merge,

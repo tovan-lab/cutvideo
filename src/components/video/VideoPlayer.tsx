@@ -21,10 +21,11 @@ interface VideoPlayerProps {
   overlayNode?: React.ReactNode;
   onTimeUpdate?: (currentTime: number) => void;
   highlightRange?: { start: number; end: number };
+  onEnded?: () => void;
 }
 
 export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(
-  ({ video, overlayNode, onTimeUpdate, highlightRange }, ref) => {
+  ({ video, overlayNode, onTimeUpdate, highlightRange, onEnded }, ref) => {
     const videoRef = useRef<HTMLVideoElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
 
@@ -168,7 +169,10 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(
               onLoadedMetadata={handleLoadedMetadata}
               onPlay={() => setIsPlaying(true)}
               onPause={() => setIsPlaying(false)}
-              onEnded={() => setIsPlaying(false)}
+              onEnded={() => {
+                setIsPlaying(false);
+                onEnded?.();
+              }}
               className="w-full h-full object-fill rounded-xl shadow-lg cursor-pointer block"
               onClick={togglePlay}
             />

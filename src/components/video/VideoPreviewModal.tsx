@@ -32,6 +32,7 @@ interface VideoPreviewModalProps {
   isOpen: boolean;
   onClose: () => void;
   videos: VideoItem[];
+  mergeItems?: MergeItem[];
   trimConfig?: TrimConfig;
   enableTrim?: boolean;
   watermarkConfig?: ObjectRemovalConfig;
@@ -47,6 +48,7 @@ export const VideoPreviewModal: React.FC<VideoPreviewModalProps> = ({
   isOpen,
   onClose,
   videos,
+  mergeItems,
   trimConfig,
   enableTrim = false,
   watermarkConfig,
@@ -74,16 +76,20 @@ export const VideoPreviewModal: React.FC<VideoPreviewModalProps> = ({
   const videoElementRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Calculate durations and clip boundaries
+  // Calculate durations and clip boundaries considering per-clip trim
   const clipDurations = useMemo(() => {
     return activeVideos.map((v, i) => {
       const d = v.metadata.duration || 5;
+      if (mergeItems && mergeItems[i]?.trimConfig) {
+        const tc = mergeItems[i].trimConfig!;
+        return Math.max(0.5, tc.endTime - tc.startTime);
+      }
       if (activeVideos.length === 1 && enableTrim && trimConfig) {
         return Math.max(0.5, trimConfig.endTime - trimConfig.startTime);
       }
       return d;
     });
-  }, [activeVideos, enableTrim, trimConfig]);
+  }, [activeVideos, enableTrim, trimConfig, mergeItems]);
 
   const transitionDuration = 0.75;
 
@@ -114,10 +120,12 @@ export const VideoPreviewModal: React.FC<VideoPreviewModalProps> = ({
       setGlobalCurrentTime(0);
       setIsPlaying(false);
       if (videoElementRef.current) {
-        const startSec =
-          activeVideos.length === 1 && enableTrim && trimConfig
-            ? trimConfig.startTime
-            : 0;
+        const itemTrim = mergeItems && mergeItems[0]?.trimConfig;
+        const startSec = itemTrim
+          ? itemTrim.startTime
+          : activeVideos.length === 1 && enableTrim && trimConfig
+          ? trimConfig.startTime
+          : 0;
         videoElementRef.current.currentTime = startSec;
       }
     }
@@ -130,16 +138,23 @@ export const VideoPreviewModal: React.FC<VideoPreviewModalProps> = ({
 
     const localTime = el.currentTime;
     const isSingleTrim = activeVideos.length === 1 && enableTrim && trimConfig;
-    const trimStart = isSingleTrim ? trimConfig.startTime : 0;
-    const trimEnd = isSingleTrim ? trimConfig.endTime : el.duration || 10;
+    const itemTrim = mergeItems && mergeItems[activeClipIndex]?.trimConfig;
+    const trimStart = itemTrim ? itemTrim.startTime : isSingleTrim ? trimConfig.startTime : 0;
+    const trimEnd = itemTrim ? itemTrim.endTime : isSingleTrim ? trimConfig.endTime : el.duration || 10;
 
-    // Check if single clip reached trim end
-    if (isSingleTrim && localTime >= trimEnd) {
-      el.pause();
-      setIsPlaying(false);
-      el.currentTime = trimStart;
-      setGlobalCurrentTime(0);
-      return;
+    // Check if reached trim end for this clip
+    if ((isSingleTrim || itemTrim) && localTime >= trimEnd) {
+      if (activeVideos.length > 1 && activeClipIndex < activeVideos.length - 1) {
+        const nextIdx = activeClipIndex + 1;
+        setActiveClipIndex(nextIdx);
+        return;
+      } else {
+        el.pause();
+        setIsPlaying(false);
+        el.currentTime = trimStart;
+        setGlobalCurrentTime(0);
+        return;
+      }
     }
 
     // Check if multi-clip reached next clip threshold
@@ -147,18 +162,15 @@ export const VideoPreviewModal: React.FC<VideoPreviewModalProps> = ({
       const currentClipDuration = clipDurations[activeClipIndex];
       const threshold =
         activeClipIndex < activeVideos.length - 1
-          ? Math.max(0.2, currentClipDuration - transitionDuration)
-          : currentClipDuration;
+          ? Math.max(0.2, currentClipDuration - transitionDuration) + trimStart
+          : currentClipDuration + trimStart;
 
       if (localTime >= threshold) {
         if (activeClipIndex < activeVideos.length - 1) {
-          // Switch to next clip!
           const nextIdx = activeClipIndex + 1;
           setActiveClipIndex(nextIdx);
-          // React will update videoElementRef src; play on loadeddata
           return;
         } else {
-          // End of sequence
           el.pause();
           setIsPlaying(false);
           setActiveClipIndex(0);
@@ -206,7 +218,9 @@ export const VideoPreviewModal: React.FC<VideoPreviewModalProps> = ({
 
     const localOffset = clamped - clipStarts[targetClipIdx];
     const isSingleTrim = activeVideos.length === 1 && enableTrim && trimConfig;
-    const targetLocalTime = (isSingleTrim ? trimConfig.startTime : 0) + localOffset;
+    const itemTrim = mergeItems && mergeItems[targetClipIdx]?.trimConfig;
+    const startSec = itemTrim ? itemTrim.startTime : isSingleTrim ? trimConfig.startTime : 0;
+    const targetLocalTime = startSec + localOffset;
 
     if (targetClipIdx !== activeClipIndex) {
       setActiveClipIndex(targetClipIdx);
@@ -227,10 +241,12 @@ export const VideoPreviewModal: React.FC<VideoPreviewModalProps> = ({
     setGlobalCurrentTime(clipStarts[idx]);
     setTimeout(() => {
       if (videoElementRef.current) {
-        const startSec =
-          activeVideos.length === 1 && enableTrim && trimConfig
-            ? trimConfig.startTime
-            : 0;
+        const itemTrim = mergeItems && mergeItems[idx]?.trimConfig;
+        const startSec = itemTrim
+          ? itemTrim.startTime
+          : activeVideos.length === 1 && enableTrim && trimConfig
+          ? trimConfig.startTime
+          : 0;
         videoElementRef.current.currentTime = startSec;
         if (isPlaying) {
           videoElementRef.current.play().catch(() => {});
@@ -351,9 +367,13 @@ export const VideoPreviewModal: React.FC<VideoPreviewModalProps> = ({
                 if (videoElementRef.current) {
                   videoElementRef.current.playbackRate = playbackRate;
                   videoElementRef.current.volume = volume;
-                  if (activeVideos.length === 1 && enableTrim && trimConfig) {
-                    videoElementRef.current.currentTime = trimConfig.startTime;
-                  }
+                  const itemTrim = mergeItems && mergeItems[activeClipIndex]?.trimConfig;
+                  const startSec = itemTrim
+                    ? itemTrim.startTime
+                    : activeVideos.length === 1 && enableTrim && trimConfig
+                    ? trimConfig.startTime
+                    : 0;
+                  videoElementRef.current.currentTime = startSec;
                   if (isPlaying) {
                     videoElementRef.current.play().catch(() => {});
                   }
