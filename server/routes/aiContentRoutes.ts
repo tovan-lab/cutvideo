@@ -36,7 +36,81 @@ const upload = multer({
 });
 
 /**
- * 1. Upload Video for AI Inspection
+ * 0. Create Resumable Upload Session for Gemini Direct Upload
+ * Bypasses Vercel serverless request limits (4.5MB) completely.
+ */
+aiContentRouter.post('/create-upload-session', async (req: Request, res: Response) => {
+  try {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.status(400).json({
+        success: false,
+        error: 'API_KEY_MISSING',
+        message: 'GEMINI_API_KEY chưa được cấu hình trong môi trường server.',
+      });
+    }
+
+    const { fileName, fileSize, mimeType } = req.body;
+    if (!fileSize) {
+      return res.status(400).json({
+        success: false,
+        error: 'INVALID_PARAMS',
+        message: 'Thiếu thông tin kích thước video.',
+      });
+    }
+
+    const cleanFileName = fileName || 'video.mp4';
+    const cleanMimeType = mimeType || 'video/mp4';
+
+    console.log(`[aiContentRouter] Initializing Gemini Resumable Upload session for ${cleanFileName} (${fileSize} bytes)...`);
+
+    const initRes = await fetch(`https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`, {
+      method: 'POST',
+      headers: {
+        'X-Goog-Upload-Protocol': 'resumable',
+        'X-Goog-Upload-Command': 'start',
+        'X-Goog-Upload-Header-Content-Length': String(fileSize),
+        'X-Goog-Upload-Header-Content-Type': cleanMimeType,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        file: {
+          display_name: cleanFileName,
+        },
+      }),
+    });
+
+    if (!initRes.ok) {
+      const errText = await initRes.text();
+      console.error('[aiContentRouter] Gemini upload session failed:', initRes.status, errText);
+      return res.status(initRes.status).json({
+        success: false,
+        error: 'GEMINI_SESSION_FAILED',
+        message: `Không thể khởi tạo phiên tải lên Gemini (${initRes.status}): ${errText.slice(0, 100)}`,
+      });
+    }
+
+    const uploadUrl = initRes.headers.get('x-goog-upload-url');
+    if (!uploadUrl) {
+      return res.status(500).json({
+        success: false,
+        error: 'NO_UPLOAD_URL',
+        message: 'Không nhận được đường dẫn tải lên từ Gemini.',
+      });
+    }
+
+    return res.json({
+      success: true,
+      uploadUrl,
+    });
+  } catch (err: any) {
+    console.error('[aiContentRouter] create-upload-session error:', err);
+    return res.status(500).json({ success: false, error: err.message || 'Lỗi tạo phiên tải lên.' });
+  }
+});
+
+/**
+ * 1. Upload Video for AI Inspection (Local Multer Fallback)
  */
 aiContentRouter.post('/upload', upload.single('video'), async (req: Request, res: Response) => {
   try {
@@ -63,8 +137,17 @@ aiContentRouter.post('/upload', upload.single('video'), async (req: Request, res
  */
 aiContentRouter.post('/extract-facts', async (req: Request, res: Response) => {
   try {
-    const { filePath, originalName, mimeType } = req.body;
-    if (!filePath || !fs.existsSync(filePath)) {
+    const { filePath, fileUri, fileName, originalName, mimeType } = req.body;
+
+    if (!filePath && !fileUri) {
+      return res.status(400).json({
+        success: false,
+        error: 'NO_VIDEO_SOURCE',
+        message: 'Vui lòng cung cấp file video hoặc đường dẫn tải lên hợp lệ.',
+      });
+    }
+
+    if (filePath && !fs.existsSync(filePath)) {
       return res.status(400).json({
         success: false,
         error: 'FILE_NOT_FOUND',
@@ -72,8 +155,16 @@ aiContentRouter.post('/extract-facts', async (req: Request, res: Response) => {
       });
     }
 
-    console.log(`[aiContentRouter] Extracting video facts for ${originalName}...`);
-    const facts = await geminiVideoFactsService.extractVideoFacts(filePath, originalName, mimeType);
+    const displayName = originalName || fileName || 'video.mp4';
+    console.log(`[aiContentRouter] Extracting video facts for ${displayName}...`);
+
+    const facts = await geminiVideoFactsService.extractVideoFacts({
+      filePath,
+      fileUri,
+      fileName,
+      originalName: displayName,
+      mimeType: mimeType || 'video/mp4',
+    });
 
     return res.json({
       success: true,

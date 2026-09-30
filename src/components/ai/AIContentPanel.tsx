@@ -135,9 +135,7 @@ export const AIContentPanel: React.FC<AIContentPanelProps> = ({
 
       // Step 1: Gemini Files API reads full video -> Video Facts
       const facts = await aiContentClient.extractVideoFacts(
-        uploadResult.filePath,
-        uploadResult.originalName,
-        uploadResult.mimeType,
+        uploadResult,
         setProgress
       );
 

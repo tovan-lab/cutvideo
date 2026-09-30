@@ -8,14 +8,23 @@ import {
 } from './types';
 import { VideoItem } from '../../types/video';
 
+export interface VideoUploadResult {
+  filePath?: string;
+  fileUri?: string;
+  fileName?: string;
+  originalName: string;
+  mimeType: string;
+}
+
 export class AIContentClient {
   /**
-   * Upload current video file or blob to /api/ai-content/upload
+   * Upload video either directly to Google Gemini Files API (bypassing Vercel 4.5MB limit)
+   * or via server upload /api/ai-content/upload as fallback.
    */
   async uploadVideo(
     video: VideoItem,
     onProgress?: (p: AIContentSEOProgress) => void
-  ): Promise<{ filePath: string; originalName: string; mimeType: string }> {
+  ): Promise<VideoUploadResult> {
     onProgress?.({ step: 'reading_video', message: 'Chuẩn bị dữ liệu video...', percent: 5 });
 
     let fileOrBlob: Blob | File | null = null;
@@ -32,10 +41,57 @@ export class AIContentClient {
       throw new Error('Không thể tìm thấy dữ liệu tập tin video để phân tích.');
     }
 
+    const fileName = video.name.endsWith('.mp4') ? video.name : `${video.name}.mp4`;
+    const mimeType = fileOrBlob.type || 'video/mp4';
+    const fileSize = fileOrBlob.size;
+
+    // Strategy 1: Attempt direct upload to Google Gemini Files API via resumable upload session
+    // This completely bypasses Vercel 4.5MB limits and works for videos up to 2GB.
+    try {
+      onProgress?.({ step: 'reading_video', message: 'Đang khởi tạo phiên tải lên đám mây...', percent: 10 });
+      const sessionRes = await fetch('/api/ai-content/create-upload-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName, fileSize, mimeType }),
+      });
+
+      if (sessionRes.ok) {
+        const sessionData = await sessionRes.json();
+        if (sessionData.uploadUrl) {
+          onProgress?.({ step: 'reading_video', message: 'Đang tải video trực tiếp lên Gemini Cloud...', percent: 18 });
+          const uploadRes = await fetch(sessionData.uploadUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Length': String(fileSize),
+              'X-Goog-Upload-Offset': '0',
+              'X-Goog-Upload-Command': 'upload, finalize',
+            },
+            body: fileOrBlob,
+          });
+
+          if (uploadRes.ok) {
+            const uploadJson = await uploadRes.json();
+            if (uploadJson.file && uploadJson.file.uri) {
+              return {
+                fileUri: uploadJson.file.uri,
+                fileName: uploadJson.file.name,
+                originalName: fileName,
+                mimeType: uploadJson.file.mimeType || mimeType,
+              };
+            }
+          } else {
+            console.warn('[AIContentClient] Direct upload failed with status:', uploadRes.status, 'falling back to server upload');
+          }
+        }
+      }
+    } catch (directErr) {
+      console.warn('[AIContentClient] Direct upload attempt error, falling back to server upload:', directErr);
+    }
+
+    // Strategy 2: Fallback to server multipart upload (/api/ai-content/upload)
     onProgress?.({ step: 'reading_video', message: 'Tải video lên engine phân tích...', percent: 15 });
 
     const formData = new FormData();
-    const fileName = video.name.endsWith('.mp4') ? video.name : `${video.name}.mp4`;
     formData.append('video', fileOrBlob, fileName);
 
     const res = await fetch('/api/ai-content/upload', {
@@ -60,11 +116,26 @@ export class AIContentClient {
    * Step 1: Extract Video Facts
    */
   async extractVideoFacts(
-    filePath: string,
-    originalName: string,
-    mimeType: string,
-    onProgress?: (p: AIContentSEOProgress) => void
+    sourceOrPath: string | VideoUploadResult,
+    originalNameOrProgress?: string | ((p: AIContentSEOProgress) => void),
+    mimeTypeOpt?: string,
+    onProgressOpt?: (p: AIContentSEOProgress) => void
   ): Promise<VideoFacts> {
+    let sourcePayload: any;
+    let onProgress: ((p: AIContentSEOProgress) => void) | undefined;
+
+    if (typeof sourceOrPath === 'string') {
+      sourcePayload = {
+        filePath: sourceOrPath,
+        originalName: typeof originalNameOrProgress === 'string' ? originalNameOrProgress : 'video.mp4',
+        mimeType: mimeTypeOpt || 'video/mp4',
+      };
+      onProgress = onProgressOpt;
+    } else {
+      sourcePayload = sourceOrPath;
+      onProgress = typeof originalNameOrProgress === 'function' ? originalNameOrProgress : onProgressOpt;
+    }
+
     onProgress?.({
       step: 'reading_video',
       message: 'Đang đọc hình ảnh & âm thanh thực tế qua Gemini (Video Facts)...',
@@ -74,7 +145,7 @@ export class AIContentClient {
     const res = await fetch('/api/ai-content/extract-facts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filePath, originalName, mimeType }),
+      body: JSON.stringify(sourcePayload),
     });
 
     if (!res.ok) {

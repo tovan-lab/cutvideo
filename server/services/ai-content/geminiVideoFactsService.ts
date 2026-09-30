@@ -64,73 +64,124 @@ async function callWithRetry(
   throw lastError || new Error('Không thể phân tích video qua Gemini. Vui lòng thử lại sau.');
 }
 
+export interface VideoFactsSource {
+  filePath?: string;
+  fileUri?: string;
+  fileName?: string;
+  originalName?: string;
+  mimeType?: string;
+}
+
 export class GeminiVideoFactsService {
   /**
    * Extract ground truth Video Facts using Gemini Files API with full audio & video inspection
    */
-  async extractVideoFacts(filePath: string, originalName: string, mimeType: string): Promise<VideoFacts> {
+  async extractVideoFacts(
+    sourceOrPath: string | VideoFactsSource,
+    legacyOriginalName?: string,
+    legacyMimeType?: string
+  ): Promise<VideoFacts> {
     const ai = getGeminiClient();
     if (!ai) {
       throw new Error('GEMINI_API_KEY chưa được cấu hình trong .env');
     }
 
-    if (!fs.existsSync(filePath)) {
-      throw new Error(`Tập tin video không tồn tại tại: ${filePath}`);
-    }
+    const source: VideoFactsSource =
+      typeof sourceOrPath === 'string'
+        ? { filePath: sourceOrPath, originalName: legacyOriginalName, mimeType: legacyMimeType }
+        : sourceOrPath;
 
-    const fileSize = fs.statSync(filePath).size;
-    console.log(`[VideoFacts] Processing video: ${originalName} (${(fileSize / (1024 * 1024)).toFixed(2)} MB)...`);
-
-    let uploadedFile: any = null;
+    const originalName = source.originalName || source.fileName || 'video.mp4';
+    const mimeType = source.mimeType || 'video/mp4';
     let filePart: any = null;
+    let uploadedFile: any = source.fileName ? { name: source.fileName } : null;
 
-    try {
-      // 1. Upload video to Gemini Files API
-      console.log(`[VideoFacts] Uploading to Gemini Files API...`);
-      uploadedFile = await ai.files.upload({
-        file: new Blob([fs.readFileSync(filePath)]),
-        config: {
-          displayName: originalName || path.basename(filePath),
-          mimeType: mimeType || 'video/mp4',
-        },
-      });
+    if (source.fileUri) {
+      console.log(`[VideoFacts] Using direct Gemini file URI: ${source.fileUri} (${originalName})...`);
 
-      console.log(`[VideoFacts] Uploaded file id: ${uploadedFile.name}. Waiting for processing...`);
+      // If fileName (e.g. files/abc123xyz) is provided, wait until ACTIVE if still PROCESSING
+      if (source.fileName) {
+        try {
+          let getFile = await ai.files.get({ name: source.fileName });
+          let waitSeconds = 0;
+          while (getFile.state === 'PROCESSING') {
+            if (waitSeconds > 60) {
+              throw new Error('Gemini xử lý video quá thời gian chờ (timeout > 60s).');
+            }
+            await new Promise((resolve) => setTimeout(resolve, 3000));
+            waitSeconds += 3;
+            getFile = await ai.files.get({ name: source.fileName });
+            console.log(`[VideoFacts] File status: ${getFile.state} (${waitSeconds}s)`);
+          }
 
-      // 2. Poll file status until ACTIVE
-      let getFile = await ai.files.get({ name: uploadedFile.name as string });
-      let waitSeconds = 0;
-      while (getFile.state === 'PROCESSING') {
-        if (waitSeconds > 60) {
-          throw new Error('Gemini xử lý video quá thời gian chờ (timeout > 60s).');
+          if (getFile.state === 'FAILED') {
+            throw new Error('Gemini Files API thông báo xử lý video thất bại.');
+          }
+        } catch (pollErr) {
+          console.warn('[VideoFacts] Warning checking file state:', pollErr);
         }
-        await new Promise((resolve) => setTimeout(resolve, 3000));
-        waitSeconds += 3;
-        getFile = await ai.files.get({ name: uploadedFile.name as string });
-        console.log(`[VideoFacts] File status: ${getFile.state} (${waitSeconds}s)`);
       }
 
-      if (getFile.state === 'FAILED') {
-        throw new Error('Gemini Files API thông báo xử lý video thất bại.');
+      filePart = createPartFromUri(source.fileUri, mimeType);
+    } else if (source.filePath) {
+      const filePath = source.filePath;
+      if (!fs.existsSync(filePath)) {
+        throw new Error(`Tập tin video không tồn tại tại: ${filePath}`);
       }
 
-      if (uploadedFile.uri && uploadedFile.mimeType) {
-        filePart = createPartFromUri(uploadedFile.uri, uploadedFile.mimeType);
-      }
-    } catch (uploadErr) {
-      console.warn(`[VideoFacts] Files API upload had an issue, checking fallback:`, uploadErr);
-      // Fallback for smaller files: read as base64 inlineData
-      if (fileSize < 20 * 1024 * 1024) {
-        const fileBuffer = fs.readFileSync(filePath);
-        filePart = {
-          inlineData: {
-            mimeType: mimeType || 'video/mp4',
-            data: fileBuffer.toString('base64'),
+      const fileSize = fs.statSync(filePath).size;
+      console.log(`[VideoFacts] Processing local video: ${originalName} (${(fileSize / (1024 * 1024)).toFixed(2)} MB)...`);
+
+      try {
+        // 1. Upload video to Gemini Files API
+        console.log(`[VideoFacts] Uploading to Gemini Files API...`);
+        uploadedFile = await ai.files.upload({
+          file: new Blob([fs.readFileSync(filePath)]),
+          config: {
+            displayName: originalName || path.basename(filePath),
+            mimeType,
           },
-        };
-      } else {
-        throw uploadErr;
+        });
+
+        console.log(`[VideoFacts] Uploaded file id: ${uploadedFile.name}. Waiting for processing...`);
+
+        // 2. Poll file status until ACTIVE
+        let getFile = await ai.files.get({ name: uploadedFile.name as string });
+        let waitSeconds = 0;
+        while (getFile.state === 'PROCESSING') {
+          if (waitSeconds > 60) {
+            throw new Error('Gemini xử lý video quá thời gian chờ (timeout > 60s).');
+          }
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+          waitSeconds += 3;
+          getFile = await ai.files.get({ name: uploadedFile.name as string });
+          console.log(`[VideoFacts] File status: ${getFile.state} (${waitSeconds}s)`);
+        }
+
+        if (getFile.state === 'FAILED') {
+          throw new Error('Gemini Files API thông báo xử lý video thất bại.');
+        }
+
+        if (uploadedFile.uri && uploadedFile.mimeType) {
+          filePart = createPartFromUri(uploadedFile.uri, uploadedFile.mimeType);
+        }
+      } catch (uploadErr) {
+        console.warn(`[VideoFacts] Files API upload had an issue, checking fallback:`, uploadErr);
+        // Fallback for smaller files: read as base64 inlineData
+        if (fileSize < 20 * 1024 * 1024) {
+          const fileBuffer = fs.readFileSync(filePath);
+          filePart = {
+            inlineData: {
+              mimeType,
+              data: fileBuffer.toString('base64'),
+            },
+          };
+        } else {
+          throw uploadErr;
+        }
       }
+    } else {
+      throw new Error('Thiếu nguồn video (cần filePath hoặc fileUri).');
     }
 
     // 3. Strict System Instruction & JSON Schema
