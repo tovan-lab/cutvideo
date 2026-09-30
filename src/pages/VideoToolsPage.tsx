@@ -12,6 +12,7 @@ import {
   Type,
 } from 'lucide-react';
 import {
+  AllInOnePlan,
   MergeItem,
   NOTEBOOKLM_PRESETS,
   ObjectRemovalConfig,
@@ -35,6 +36,7 @@ import {
 import { TextOverlayEditor } from '../components/video/TextOverlayEditor';
 import { TextOverlayCanvas } from '../components/video/TextOverlayCanvas';
 import { UnifiedCleanControls } from '../components/video/UnifiedCleanControls';
+import { AllInOneControls } from '../components/video/AllInOneControls';
 import { ProcessingModal } from '../components/video/ProcessingModal';
 import { VideoResult } from '../components/video/VideoResult';
 import { QualitySelector } from '../components/common/QualitySelector';
@@ -326,19 +328,19 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
     onShowToast('Đã hủy thao tác xử lý video.', 'info');
   };
 
-  const handleExecuteUnifiedClean = async (plan: UnifiedEditPlan) => {
+  const handleExecuteAllInOne = async (plan: AllInOnePlan) => {
     try {
       setIsProcessing(true);
       abortControllerRef.current = new AbortController();
-      const res = await unifiedRenderService.render(
+      const res = await unifiedRenderService.renderAllInOne(
         plan,
         (progress) => setProcessingProgress(progress),
         abortControllerRef.current.signal
       );
       setOperationResult(res);
-      onShowToast('Làm sạch video hoàn tất thành công!', 'success');
+      onShowToast('Xuất video trọn gói All-in-One thành công!', 'success');
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Lỗi xử lý làm sạch video.';
+      const msg = err instanceof Error ? err.message : 'Lỗi xử lý xuất video trọn gói.';
       onShowToast(msg, 'error');
     } finally {
       setIsProcessing(false);
@@ -349,8 +351,8 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
   const tools: Array<{ id: ToolType; label: string; desc: string; icon: React.ReactNode }> = [
     {
       id: 'unified',
-      label: '⚡ Làm Sạch Gộp',
-      desc: 'Cắt intro + Khử logo 1 lần',
+      label: '⚡ Trọn Gói 1 Lần',
+      desc: 'Xóa logo + Cắt ghép + Chữ',
       icon: <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />,
     },
     {
@@ -442,11 +444,30 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
                       currentTime={currentTime}
                       totalDuration={currentVideo.metadata.duration || 10}
                     />
-                  ) : activeTool === 'watermark' || activeTool === 'unified' ? (
+                  ) : activeTool === 'watermark' ? (
                     <ObjectRemovalOverlay
                       config={watermarkConfig}
                       onChange={setWatermarkConfig}
                     />
+                  ) : activeTool === 'unified' ? (
+                    <>
+                      <ObjectRemovalOverlay
+                        config={watermarkConfig}
+                        onChange={setWatermarkConfig}
+                      />
+                      <TextOverlayCanvas
+                        items={textItems}
+                        selectedId={selectedTextId}
+                        onSelectItem={setSelectedTextId}
+                        onUpdateItemPosition={(id, x, y) => {
+                          setTextItems((prev) =>
+                            prev.map((it) => (it.id === id ? { ...it, positionPreset: 'custom', x, y } : it))
+                          );
+                        }}
+                        currentTime={currentTime}
+                        totalDuration={currentVideo.metadata.duration || 10}
+                      />
+                    </>
                   ) : undefined
                 }
               />
@@ -455,20 +476,27 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
             {/* Right/Bottom: Tool Controls & Quality (5 Cols on desktop) */}
             <div className="lg:col-span-5 space-y-4">
               {activeTool === 'unified' && (
-                <UnifiedCleanControls
-                  video={currentVideo}
+                <AllInOneControls
+                  currentVideo={currentVideo}
                   quality={outputQuality}
-                  watermarkArea={watermarkConfig.area}
-                  onChangeWatermarkArea={(newArea) =>
-                    setWatermarkConfig((prev) => ({ ...prev, area: newArea }))
-                  }
-                  onExecuteClean={handleExecuteUnifiedClean}
+                  trimConfig={trimConfig}
+                  onChangeTrimConfig={setTrimConfig}
+                  watermarkConfig={watermarkConfig}
+                  onChangeWatermarkConfig={setWatermarkConfig}
+                  mergeItems={mergeItems}
+                  onChangeMergeItems={setMergeItems}
+                  autoTransitions={autoTransitions}
+                  onToggleAutoTransitions={setAutoTransitions}
+                  textItems={textItems}
+                  onChangeTextItems={setTextItems}
+                  onExecuteAllInOne={handleExecuteAllInOne}
                   onPreviewTrim={(start, end) => {
                     if (playerRef.current) {
                       playerRef.current.seekTo(start);
                       playerRef.current.play();
                     }
                   }}
+                  onSwitchToolTab={(tool) => setActiveTool(tool)}
                   isProcessing={isProcessing}
                 />
               )}

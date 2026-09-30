@@ -262,3 +262,82 @@ videoRouter.post(
     }
   }
 );
+
+/**
+ * ALL-IN-ONE SINGLE-PASS EXPORT ENDPOINT:
+ * Merges clips (with transitions) + Trims + Removes Watermark + Overlays Texts in 1 single pass!
+ */
+videoRouter.post(
+  '/render-all-in-one',
+  diskUpload.array('videos', 25),
+  async (req: Request, res: Response) => {
+    const uploadedFiles = req.files as Express.Multer.File[];
+    if (!uploadedFiles || uploadedFiles.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'NO_VIDEO_PROVIDED',
+        message: 'Vui lòng tải lên ít nhất một video.',
+      });
+    }
+
+    const inputPaths = uploadedFiles.map((f) => f.path);
+    const outputPath = path.join(
+      tempDir,
+      `all_in_one_${Date.now()}_${Math.random().toString(36).substring(7)}.mp4`
+    );
+
+    try {
+      const optionsRaw = req.body.options;
+      const options = optionsRaw ? JSON.parse(optionsRaw) : {};
+
+      const result = await serverFFmpegService.renderAllInOne({
+        inputPaths,
+        outputPath,
+        trim: options.trim,
+        watermark: options.watermark,
+        textItems: options.textItems,
+        merge: options.merge,
+        quality: options.quality || 'original',
+      });
+
+      res.setHeader('Content-Type', 'video/mp4');
+      res.setHeader('X-Duration', result.duration.toString());
+      res.setHeader('X-Size-Bytes', result.sizeBytes.toString());
+      res.setHeader('Content-Disposition', 'attachment; filename="video_all_in_one.mp4"');
+
+      const readStream = fs.createReadStream(result.outputPath);
+      readStream.pipe(res);
+
+      readStream.on('close', async () => {
+        for (const ip of inputPaths) {
+          await fsp.unlink(ip).catch(() => {});
+        }
+        await fsp.unlink(outputPath).catch(() => {});
+      });
+
+      readStream.on('error', async (streamErr) => {
+        console.error('Error streaming all-in-one video:', streamErr);
+        for (const ip of inputPaths) {
+          await fsp.unlink(ip).catch(() => {});
+        }
+        await fsp.unlink(outputPath).catch(() => {});
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Lỗi xử lý xuất video trọn gói All-in-One.';
+      console.error('All-in-one render failed:', err);
+
+      for (const ip of inputPaths) {
+        await fsp.unlink(ip).catch(() => {});
+      }
+      await fsp.unlink(outputPath).catch(() => {});
+
+      if (!res.headersSent) {
+        return res.status(500).json({
+          success: false,
+          error: 'ALL_IN_ONE_RENDER_FAILED',
+          message: msg,
+        });
+      }
+    }
+  }
+);

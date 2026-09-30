@@ -206,6 +206,29 @@ export interface UnifiedEditPlan {
   quality: OutputQuality;
 }
 
+export interface AllInOnePlan {
+  videos: VideoItem[];
+  trim?: {
+    enabled: boolean;
+    startSec: number;
+    endSec: number;
+  };
+  watermark?: {
+    enabled: boolean;
+    method: 'blur' | 'cover' | 'delogo';
+    area: BoundingBox;
+    coverColor?: string;
+    feather?: number;
+  };
+  textItems?: TextOverlayItem[];
+  merge?: {
+    enabled: boolean;
+    transitions?: { index: number; type: TransitionType; duration: number }[];
+    autoTransitions?: boolean;
+  };
+  quality: OutputQuality;
+}
+
 export interface ObjectTrackingResult {
   supported: boolean;
   frameCount: number;

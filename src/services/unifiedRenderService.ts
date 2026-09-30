@@ -1,4 +1,5 @@
 import {
+  AllInOnePlan,
   BoundingBox,
   OutputQuality,
   ProcessingProgress,
@@ -287,6 +288,277 @@ export class UnifiedRenderService {
       metadata: video.metadata,
       blob: video.blob,
       reencodeStatus: 'no_reencode',
+      engineUsed: 'browser',
+    };
+  }
+
+  /**
+   * ALL-IN-ONE SINGLE-PASS PIPELINE:
+   * Merges clips (with transitions) + Trims + Removes Watermark + Overlays Texts in 1 single pass!
+   */
+  async renderAllInOne(
+    plan: AllInOnePlan,
+    onProgress?: (progress: ProcessingProgress) => void,
+    signal?: AbortSignal
+  ): Promise<VideoOperationResult> {
+    const isNativeAvailable = await this.checkNativeFFmpegAvailable();
+
+    if (isNativeAvailable) {
+      try {
+        onProgress?.({
+          stage: 'analyzing',
+          percent: 5,
+          message: 'Đang chuẩn bị xuất video trọn gói All-in-One (Native FFmpeg)...',
+        });
+
+        return await this.renderAllInOneNative(plan, onProgress, signal);
+      } catch (nativeErr: unknown) {
+        if (signal?.aborted) throw nativeErr;
+        console.warn('Native FFmpeg renderAllInOne failed, trying step fallback:', nativeErr);
+      }
+    }
+
+    // Fallback: run sequential unified steps on client
+    return await this.renderAllInOneFallback(plan, onProgress, signal);
+  }
+
+  private async renderAllInOneNative(
+    plan: AllInOnePlan,
+    onProgress?: (progress: ProcessingProgress) => void,
+    signal?: AbortSignal
+  ): Promise<VideoOperationResult> {
+    const { videos, trim, watermark, textItems, merge, quality } = plan;
+    if (!videos || videos.length === 0) {
+      throw new Error('Chưa có video để xuất.');
+    }
+
+    const formData = new FormData();
+    for (let i = 0; i < videos.length; i++) {
+      const v = videos[i];
+      let fileBlob: Blob | File;
+      if (v.file) {
+        fileBlob = v.file;
+      } else if (v.blob) {
+        fileBlob = v.blob;
+      } else {
+        const resp = await fetch(v.url);
+        fileBlob = await resp.blob();
+      }
+      formData.append('videos', fileBlob, v.name || `clip_${i}.mp4`);
+    }
+
+    const options = {
+      trim: trim?.enabled
+        ? {
+            enabled: true,
+            startSec: trim.startSec,
+            endSec: trim.endSec,
+          }
+        : undefined,
+      watermark: watermark?.enabled
+        ? {
+            enabled: true,
+            method: watermark.method,
+            area: watermark.area,
+            color: watermark.coverColor,
+            feather: watermark.feather,
+          }
+        : undefined,
+      textItems: textItems && textItems.length > 0 ? textItems : undefined,
+      merge: merge?.enabled
+        ? {
+            enabled: true,
+            transitions: merge.transitions,
+            autoTransitions: merge.autoTransitions,
+          }
+        : undefined,
+      quality: quality || 'original',
+    };
+
+    formData.append('options', JSON.stringify(options));
+
+    const startTime = performance.now();
+
+    return new Promise<VideoOperationResult>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/video/render-all-in-one');
+      xhr.responseType = 'blob';
+
+      if (signal) {
+        signal.addEventListener('abort', () => {
+          xhr.abort();
+          reject(new Error('Thao tác xuất video All-in-One đã bị hủy.'));
+        });
+      }
+
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const uploadPercent = Math.round((e.loaded / e.total) * 35);
+          onProgress?.({
+            stage: 'processing',
+            percent: Math.max(5, uploadPercent),
+            message: `Đang tải ${videos.length} video lên bộ xử lý FFmpeg: ${Math.round((e.loaded / e.total) * 100)}%...`,
+            elapsedSeconds: Number(((performance.now() - startTime) / 1000).toFixed(1)),
+          });
+        }
+      };
+
+      xhr.upload.onload = () => {
+        onProgress?.({
+          stage: 'encoding',
+          percent: 50,
+          message: 'Native FFmpeg đang tổng hợp (Cắt + Xóa Watermark + Ghép Clip + Chèn Chữ) trong 1 lần duy nhất...',
+          elapsedSeconds: Number(((performance.now() - startTime) / 1000).toFixed(1)),
+        });
+      };
+
+      xhr.onload = async () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          const outBlob = xhr.response as Blob;
+          const durationHeader = Number(xhr.getResponseHeader('X-Duration')) || videos[0].metadata.duration;
+          const outUrl = URL.createObjectURL(outBlob);
+          this.activeUrls.add(outUrl);
+
+          const probedMeta = await videoProcessor.probeVideo(outBlob).catch(() => ({
+            ...videos[0].metadata,
+            duration: durationHeader,
+            sizeBytes: outBlob.size,
+          }));
+
+          onProgress?.({
+            stage: 'completed',
+            percent: 100,
+            message: 'Đã xuất thành công video trọn gói hoàn chỉnh!',
+            elapsedSeconds: Number(((performance.now() - startTime) / 1000).toFixed(1)),
+          });
+
+          resolve({
+            success: true,
+            videoUrl: outUrl,
+            videoName: `all_in_one_${Date.now()}.mp4`,
+            downloadName: `video_all_in_one.mp4`,
+            duration: probedMeta.duration,
+            sizeBytes: outBlob.size,
+            quality,
+            operation: 'unified',
+            metadata: probedMeta,
+            blob: outBlob,
+            reencodeStatus: 'reencoded',
+            engineUsed: 'native_ffmpeg',
+          });
+        } else {
+          try {
+            const errReader = new FileReader();
+            errReader.onload = () => {
+              try {
+                const parsed = JSON.parse(errReader.result as string);
+                reject(new Error(parsed.message || 'Lỗi xử lý All-in-One trên server FFmpeg'));
+              } catch {
+                reject(new Error(`Server FFmpeg báo lỗi HTTP ${xhr.status}`));
+              }
+            };
+            errReader.readAsText(xhr.response);
+          } catch {
+            reject(new Error(`Server FFmpeg báo lỗi HTTP ${xhr.status}`));
+          }
+        }
+      };
+
+      xhr.onerror = () => {
+        reject(new Error('Lỗi kết nối tới Server Native FFmpeg.'));
+      };
+
+      xhr.send(formData);
+    });
+  }
+
+  private async renderAllInOneFallback(
+    plan: AllInOnePlan,
+    onProgress?: (progress: ProcessingProgress) => void,
+    signal?: AbortSignal
+  ): Promise<VideoOperationResult> {
+    const { videos, trim, watermark, textItems, quality } = plan;
+    let currentVideo = videos[0];
+
+    // Fallback: If merge enabled with multiple videos
+    if (plan.merge?.enabled && videos.length > 1) {
+      onProgress?.({
+        stage: 'processing',
+        percent: 20,
+        message: 'Đang ghép các clip video...',
+      });
+      const mergeRes = await videoProcessor.mergeVideos(
+        {
+          items: videos.map((v, i) => ({ video: v, order: i })),
+          quality,
+          autoTransitions: plan.merge.autoTransitions,
+        },
+        onProgress,
+        signal
+      );
+      currentVideo = {
+        ...videos[0],
+        url: mergeRes.videoUrl,
+        blob: mergeRes.blob,
+        metadata: mergeRes.metadata,
+      };
+    }
+
+    // Step 2: Trim & Watermark
+    if (trim?.enabled || watermark?.enabled) {
+      onProgress?.({
+        stage: 'processing',
+        percent: 50,
+        message: 'Đang cắt và xử lý watermark...',
+      });
+      const cleanRes = await this.render(
+        {
+          video: currentVideo,
+          trim,
+          watermark,
+          quality,
+        },
+        onProgress,
+        signal
+      );
+      currentVideo = {
+        ...currentVideo,
+        url: cleanRes.videoUrl,
+        blob: cleanRes.blob,
+        metadata: cleanRes.metadata,
+      };
+    }
+
+    // Step 3: Text items
+    if (textItems && textItems.length > 0) {
+      onProgress?.({
+        stage: 'processing',
+        percent: 80,
+        message: 'Đang chèn các lớp chữ...',
+      });
+      return await videoProcessor.renderTextOverlay(
+        {
+          video: currentVideo,
+          textItems,
+          quality,
+        },
+        onProgress,
+        signal
+      );
+    }
+
+    return {
+      success: true,
+      videoUrl: currentVideo.url,
+      videoName: currentVideo.name,
+      downloadName: `video_all_in_one.mp4`,
+      duration: currentVideo.metadata.duration,
+      sizeBytes: currentVideo.metadata.sizeBytes,
+      quality,
+      operation: 'unified',
+      metadata: currentVideo.metadata,
+      blob: currentVideo.blob,
+      reencodeStatus: 'reencoded',
       engineUsed: 'browser',
     };
   }
