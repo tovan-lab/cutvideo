@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import { aiContentRouter } from '../server/routes/aiContentRoutes';
 
@@ -16,15 +15,13 @@ app.use((req, _res, next) => {
   next();
 });
 
-// Mount aiContentRouter for both /api/ai-content and /ai-content
-app.use('/api/ai-content', aiContentRouter);
-app.use('/ai-content', aiContentRouter);
-
 // Health check endpoint
 app.get(['/api/health', '/health'], (_req: Request, res: Response) => {
   res.json({ status: 'ok', serverless: true, time: new Date().toISOString() });
 });
 
-export default function handler(req: Request, res: Response) {
-  return app(req, res);
-}
+// Mount aiContentRouter for both /api/ai-content and /ai-content
+app.use('/api/ai-content', aiContentRouter);
+app.use('/ai-content', aiContentRouter);
+
+export default app;

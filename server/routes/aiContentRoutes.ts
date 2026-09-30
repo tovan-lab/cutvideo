@@ -14,12 +14,18 @@ import {
   VideoFacts,
 } from '../../src/lib/ai-content/types';
 
+import * as os from 'os';
+
 export const aiContentRouter = Router();
 
-// Dedicated temporary upload folder for AI Content
-const tempUploadDir = path.resolve(process.cwd(), 'uploads', 'ai-content-temp');
-if (!fs.existsSync(tempUploadDir)) {
-  fs.mkdirSync(tempUploadDir, { recursive: true });
+// Dedicated temporary upload folder for AI Content (serverless safe via os.tmpdir)
+const tempUploadDir = path.join(os.tmpdir(), 'ai-content-temp');
+try {
+  if (!fs.existsSync(tempUploadDir)) {
+    fs.mkdirSync(tempUploadDir, { recursive: true });
+  }
+} catch (dirErr) {
+  console.warn('[aiContentRouter] Note: tempUploadDir check:', dirErr);
 }
 
 const storage = multer.diskStorage({
