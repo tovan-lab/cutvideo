@@ -37,6 +37,7 @@ import { TextOverlayEditor } from '../components/video/TextOverlayEditor';
 import { TextOverlayCanvas } from '../components/video/TextOverlayCanvas';
 import { UnifiedCleanControls } from '../components/video/UnifiedCleanControls';
 import { AllInOneControls } from '../components/video/AllInOneControls';
+import { VideoPreviewModal } from '../components/video/VideoPreviewModal';
 import { ProcessingModal } from '../components/video/ProcessingModal';
 import { VideoResult } from '../components/video/VideoResult';
 import { QualitySelector } from '../components/common/QualitySelector';
@@ -142,6 +143,10 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
 
   // Result state
   const [operationResult, setOperationResult] = useState<VideoOperationResult | null>(null);
+
+  // Preview before export state
+  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
+  const [isInlinePreviewClean, setIsInlinePreviewClean] = useState(false);
 
   // When current video changes, sync duration & trim & auto-detect watermark preset
   const handleVideoSelected = (video: VideoItem) => {
@@ -420,7 +425,47 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
           {/* Desktop/Tablet 2-Column or Mobile Stack */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 sm:gap-5 items-start">
             {/* Left/Top: Video Preview Player (7 Cols on desktop) */}
-            <div className="lg:col-span-7 space-y-3">
+            <div className="lg:col-span-7 space-y-2.5">
+              {/* Preview Mode Switcher & Quick Launch Bar */}
+              <div className="flex items-center justify-between px-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Chế độ xem:</span>
+                  <div className="flex items-center p-0.5 rounded-xl bg-slate-900 border border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => setIsInlinePreviewClean(false)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                        !isInlinePreviewClean
+                          ? 'bg-indigo-600 text-white shadow-sm'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      ✏️ Chỉnh sửa
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsInlinePreviewClean(true)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                        isInlinePreviewClean
+                          ? 'bg-emerald-600 text-white shadow-sm'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      👀 Xem thành phẩm
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsPreviewModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-indigo-500/30 text-indigo-300 hover:text-white text-xs font-bold transition-all shadow-sm"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Xem Lại Toàn Bộ</span>
+                </button>
+              </div>
+
               <VideoPlayer
                 ref={playerRef}
                 video={currentVideo}
@@ -443,17 +488,20 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
                       }}
                       currentTime={currentTime}
                       totalDuration={currentVideo.metadata.duration || 10}
+                      isPreviewMode={isInlinePreviewClean}
                     />
                   ) : activeTool === 'watermark' ? (
                     <ObjectRemovalOverlay
                       config={watermarkConfig}
                       onChange={setWatermarkConfig}
+                      isPreviewMode={isInlinePreviewClean}
                     />
                   ) : activeTool === 'unified' ? (
                     <>
                       <ObjectRemovalOverlay
                         config={watermarkConfig}
                         onChange={setWatermarkConfig}
+                        isPreviewMode={isInlinePreviewClean}
                       />
                       <TextOverlayCanvas
                         items={textItems}
@@ -466,6 +514,7 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
                         }}
                         currentTime={currentTime}
                         totalDuration={currentVideo.metadata.duration || 10}
+                        isPreviewMode={isInlinePreviewClean}
                       />
                     </>
                   ) : undefined
@@ -497,6 +546,7 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
                     }
                   }}
                   onSwitchToolTab={(tool) => setActiveTool(tool)}
+                  onOpenPreviewModal={() => setIsPreviewModalOpen(true)}
                   isProcessing={isProcessing}
                 />
               )}
@@ -595,6 +645,55 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
         progress={processingProgress}
         onCancel={handleCancelProcessing}
       />
+
+      {/* Video Preview Modal Before Export */}
+      {currentVideo && (
+        <VideoPreviewModal
+          isOpen={isPreviewModalOpen}
+          onClose={() => setIsPreviewModalOpen(false)}
+          videos={
+            mergeItems.length > 0 ? mergeItems.map((m) => m.video) : [currentVideo]
+          }
+          trimConfig={trimConfig}
+          enableTrim={activeTool === 'trim' || activeTool === 'unified'}
+          watermarkConfig={watermarkConfig}
+          enableWatermark={activeTool === 'watermark' || activeTool === 'unified'}
+          textItems={textItems}
+          enableText={activeTool === 'text' || activeTool === 'unified'}
+          mergeEnabled={mergeItems.length > 1}
+          autoTransitions={autoTransitions}
+          onConfirmExport={() => {
+            const plan: AllInOnePlan = {
+              videos:
+                mergeItems.length > 1
+                  ? mergeItems.map((m) => m.video)
+                  : [currentVideo],
+              trim: {
+                enabled: true,
+                startSec: trimConfig.startTime,
+                endSec: trimConfig.endTime,
+              },
+              watermark: {
+                enabled: true,
+                method:
+                  watermarkConfig.method === 'ai_inpaint'
+                    ? 'blur'
+                    : watermarkConfig.method,
+                area: watermarkConfig.area,
+                coverColor: watermarkConfig.coverColor,
+                feather: watermarkConfig.feather,
+              },
+              textItems: textItems.filter((t) => t.text.trim().length > 0),
+              merge:
+                mergeItems.length > 1
+                  ? { enabled: true, autoTransitions }
+                  : undefined,
+              quality: outputQuality,
+            };
+            handleExecuteAllInOne(plan);
+          }}
+        />
+      )}
     </div>
   );
 };

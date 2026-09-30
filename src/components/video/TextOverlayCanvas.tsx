@@ -8,6 +8,7 @@ interface TextOverlayCanvasProps {
   onUpdateItemPosition: (id: string, x: number, y: number) => void;
   currentTime: number;
   totalDuration: number;
+  isPreviewMode?: boolean;
 }
 
 export const TextOverlayCanvas: React.FC<TextOverlayCanvasProps> = ({
@@ -17,12 +18,14 @@ export const TextOverlayCanvas: React.FC<TextOverlayCanvasProps> = ({
   onUpdateItemPosition,
   currentTime,
   totalDuration,
+  isPreviewMode = false,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const isDraggingRef = useRef(false);
   const draggingIdRef = useRef<string | null>(null);
 
   const handlePointerDown = (e: React.PointerEvent, id: string) => {
+    if (isPreviewMode) return;
     e.stopPropagation();
     onSelectItem(id);
     isDraggingRef.current = true;
@@ -31,7 +34,7 @@ export const TextOverlayCanvas: React.FC<TextOverlayCanvasProps> = ({
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (!isDraggingRef.current || !draggingIdRef.current || !containerRef.current) return;
+    if (isPreviewMode || !isDraggingRef.current || !draggingIdRef.current || !containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
     const xPx = e.clientX - rect.left;
     const yPx = e.clientY - rect.top;
@@ -57,7 +60,9 @@ export const TextOverlayCanvas: React.FC<TextOverlayCanvasProps> = ({
       ref={containerRef}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
-      className="absolute inset-0 w-full h-full pointer-events-auto select-none overflow-visible"
+      className={`absolute inset-0 w-full h-full select-none overflow-visible ${
+        isPreviewMode ? 'pointer-events-none' : 'pointer-events-auto'
+      }`}
     >
       {items.map((item) => {
         // Check visibility at currentTime
@@ -67,7 +72,7 @@ export const TextOverlayCanvas: React.FC<TextOverlayCanvasProps> = ({
 
         if (!isVisible) return null;
 
-        const isSelected = selectedId === item.id;
+        const isSelected = !isPreviewMode && selectedId === item.id;
         const opacityVal = (item.opacity ?? 100) / 100;
 
         // Position coordinates

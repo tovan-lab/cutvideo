@@ -42,6 +42,7 @@ interface AllInOneControlsProps {
   onExecuteAllInOne: (plan: AllInOnePlan) => void;
   onPreviewTrim: (startSec: number, endSec: number) => void;
   onSwitchToolTab: (tool: ToolType) => void;
+  onOpenPreviewModal: () => void;
   isProcessing: boolean;
 }
 
@@ -61,6 +62,7 @@ export const AllInOneControls: React.FC<AllInOneControlsProps> = ({
   onExecuteAllInOne,
   onPreviewTrim,
   onSwitchToolTab,
+  onOpenPreviewModal,
   isProcessing,
 }) => {
   const duration = currentVideo.metadata.duration || 10;
@@ -539,6 +541,16 @@ export const AllInOneControls: React.FC<AllInOneControlsProps> = ({
           )}
         </ul>
       </div>
+
+      {/* Preview Master Button */}
+      <button
+        type="button"
+        onClick={onOpenPreviewModal}
+        className="w-full min-h-[46px] flex items-center justify-center gap-2 py-3 px-5 rounded-2xl bg-indigo-950/40 hover:bg-indigo-900/60 text-indigo-300 hover:text-white border border-indigo-500/40 font-bold text-xs sm:text-sm shadow-lg shadow-black/40 transition-all hover:scale-[1.01] active:scale-[0.99]"
+      >
+        <Eye className="w-4 h-4 text-indigo-400" />
+        <span>👁️ Xem Lại Toàn Bộ Video Trước Khi Xuất</span>
+      </button>
 
       {/* Primary Action Button */}
       <button

@@ -518,9 +518,34 @@ export const ObjectRemovalSelector: React.FC<ObjectRemovalSelectorProps> = ({
 export const ObjectRemovalOverlay: React.FC<{
   config: ObjectRemovalConfig;
   onChange: (config: ObjectRemovalConfig) => void;
-}> = ({ config, onChange }) => {
+  isPreviewMode?: boolean;
+}> = ({ config, onChange, isPreviewMode = false }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [activeAction, setActiveAction] = useState<'move' | 'nw' | 'ne' | 'se' | 'sw' | null>(null);
+
+  if (isPreviewMode) {
+    return (
+      <div className="absolute inset-0 select-none pointer-events-none overflow-hidden">
+        <div
+          style={{
+            left: `${config.area.x}%`,
+            top: `${config.area.y}%`,
+            width: `${config.area.width}%`,
+            height: `${config.area.height}%`,
+            filter: config.feather ? `blur(${Math.min(config.feather / 2, 8)}px)` : undefined,
+            backgroundColor: config.method === 'cover' ? (config.coverColor || '#020617') : undefined,
+          }}
+          className={`absolute pointer-events-none rounded-sm ${
+            config.method === 'cover'
+              ? ''
+              : config.method === 'blur'
+              ? 'backdrop-blur-md bg-black/30'
+              : 'backdrop-blur-sm bg-slate-900/40'
+          }`}
+        />
+      </div>
+    );
+  }
 
   const startStateRef = useRef<{
     pointerX: number;
