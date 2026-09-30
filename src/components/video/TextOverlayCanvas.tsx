@@ -36,8 +36,8 @@ export const TextOverlayCanvas: React.FC<TextOverlayCanvasProps> = ({
     const xPx = e.clientX - rect.left;
     const yPx = e.clientY - rect.top;
 
-    const xPct = Math.max(5, Math.min(95, Math.round((xPx / rect.width) * 100)));
-    const yPct = Math.max(5, Math.min(95, Math.round((yPx / rect.height) * 100)));
+    const xPct = Math.max(0, Math.min(100, Math.round((xPx / rect.width) * 100)));
+    const yPct = Math.max(0, Math.min(100, Math.round((yPx / rect.height) * 100)));
 
     onUpdateItemPosition(draggingIdRef.current, xPct, yPct);
   };
@@ -57,7 +57,7 @@ export const TextOverlayCanvas: React.FC<TextOverlayCanvasProps> = ({
       ref={containerRef}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
-      className="absolute inset-0 w-full h-full pointer-events-auto select-none overflow-hidden"
+      className="absolute inset-0 w-full h-full pointer-events-auto select-none overflow-visible"
     >
       {items.map((item) => {
         // Check visibility at currentTime
@@ -164,7 +164,7 @@ export const TextOverlayCanvas: React.FC<TextOverlayCanvasProps> = ({
               fontStyle: item.isItalic ? 'italic' : 'normal',
               textAlign: item.textAlign,
             }}
-            className={`absolute cursor-move select-none transition-shadow ${
+            className={`absolute cursor-move select-none transition-shadow w-max max-w-none ${
               isSelected ? 'ring-2 ring-indigo-400 ring-offset-2 ring-offset-black/80 rounded-xl' : ''
             }`}
           >
@@ -178,8 +178,9 @@ export const TextOverlayCanvas: React.FC<TextOverlayCanvasProps> = ({
                 lineHeight: 1.25,
                 textShadow: textShadowStyle,
                 WebkitTextStroke: textStrokeStyle,
+                whiteSpace: 'pre',
               }}
-              className="whitespace-pre-wrap font-sans transition-all"
+              className="font-sans transition-all w-max max-w-none"
             >
               {displayText || 'Nhập văn bản...'}
             </div>
