@@ -1,0 +1,6 @@
+{
+  "name": "Personal Video Tool",
+  "description": "Minimalist, high-performance personal video utility for trimming, merging, watermark removal, and AI social content generation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
