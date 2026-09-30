@@ -10,6 +10,7 @@ import { MobileNav } from './components/layout/MobileNav';
 import { Background3D } from './components/layout/Background3D';
 import { ToastContainer, ToastMessage } from './components/common/Toast';
 import { QualityModal, AboutModal } from './components/common/Modals';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { VideoToolsPage } from './pages/VideoToolsPage';
 import { AIContentPage } from './pages/AIContentPage';
 
@@ -35,64 +36,68 @@ export default function App() {
   };
 
   return (
-    <div className="relative min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-600/30 selection:text-white overflow-x-hidden">
-      {/* 3D Animated Cosmic Background */}
-      <Background3D />
-      {/* Top Header */}
-      <Header
-        activeTab={activeTab}
-        onTabChange={(tab) => setActiveTab(tab)}
-        outputQuality={outputQuality}
-        onOpenQualityModal={() => setIsQualityModalOpen(true)}
-        onOpenAboutModal={() => setIsAboutModalOpen(true)}
-      />
+    <ErrorBoundary>
+      <div className="relative min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-600/30 selection:text-white overflow-x-hidden">
+        {/* 3D Animated Cosmic Background */}
+        <Background3D />
+        {/* Top Header */}
+        <Header
+          activeTab={activeTab}
+          onTabChange={(tab) => setActiveTab(tab)}
+          outputQuality={outputQuality}
+          onOpenQualityModal={() => setIsQualityModalOpen(true)}
+          onOpenAboutModal={() => setIsAboutModalOpen(true)}
+        />
 
-      {/* Main Content Area */}
-      <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 pt-5">
-        {activeTab === 'video' ? (
-          <VideoToolsPage
-            currentVideo={currentVideo}
-            onSelectVideo={setCurrentVideo}
-            outputQuality={outputQuality}
-            onChangeQuality={setOutputQuality}
-            onShowToast={showToast}
-            onJumpToAI={() => setActiveTab('ai')}
-          />
-        ) : (
-          <AIContentPage
-            currentVideo={currentVideo}
-            onSelectVideo={setCurrentVideo}
-            onShowToast={showToast}
-          />
-        )}
-      </main>
+        {/* Main Content Area */}
+        <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 pt-5">
+          <ErrorBoundary fallbackTitle="Không thể tải nội dung trang">
+            {activeTab === 'video' ? (
+              <VideoToolsPage
+                currentVideo={currentVideo}
+                onSelectVideo={setCurrentVideo}
+                outputQuality={outputQuality}
+                onChangeQuality={setOutputQuality}
+                onShowToast={showToast}
+                onJumpToAI={() => setActiveTab('ai')}
+              />
+            ) : (
+              <AIContentPage
+                currentVideo={currentVideo}
+                onSelectVideo={setCurrentVideo}
+                onShowToast={showToast}
+              />
+            )}
+          </ErrorBoundary>
+        </main>
 
-      {/* Mobile Bottom Tab Bar */}
-      <MobileNav
-        activeTab={activeTab}
-        onTabChange={(tab) => setActiveTab(tab)}
-        outputQuality={outputQuality}
-        onOpenQualityModal={() => setIsQualityModalOpen(true)}
-      />
+        {/* Mobile Bottom Tab Bar */}
+        <MobileNav
+          activeTab={activeTab}
+          onTabChange={(tab) => setActiveTab(tab)}
+          outputQuality={outputQuality}
+          onOpenQualityModal={() => setIsQualityModalOpen(true)}
+        />
 
-      {/* Modals & Overlays */}
-      <QualityModal
-        isOpen={isQualityModalOpen}
-        onClose={() => setIsQualityModalOpen(false)}
-        quality={outputQuality}
-        onSelectQuality={(q) => {
-          setOutputQuality(q);
-          showToast(`Đã chọn chất lượng xuất: ${q === 'original' ? 'Gốc (Max)' : q}`, 'success');
-        }}
-      />
+        {/* Modals & Overlays */}
+        <QualityModal
+          isOpen={isQualityModalOpen}
+          onClose={() => setIsQualityModalOpen(false)}
+          quality={outputQuality}
+          onSelectQuality={(q) => {
+            setOutputQuality(q);
+            showToast(`Đã chọn chất lượng xuất: ${q === 'original' ? 'Gốc (Max)' : q}`, 'success');
+          }}
+        />
 
-      <AboutModal
-        isOpen={isAboutModalOpen}
-        onClose={() => setIsAboutModalOpen(false)}
-      />
+        <AboutModal
+          isOpen={isAboutModalOpen}
+          onClose={() => setIsAboutModalOpen(false)}
+        />
 
-      {/* Global Toast Container */}
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
-    </div>
+        {/* Global Toast Container */}
+        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      </div>
+    </ErrorBoundary>
   );
 }

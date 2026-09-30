@@ -553,7 +553,7 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
                         );
                       }}
                       currentTime={currentTime}
-                      totalDuration={currentVideo.metadata.duration || 10}
+                      totalDuration={currentVideo?.metadata?.duration || 10}
                       isPreviewMode={isInlinePreviewClean}
                     />
                   ) : activeTool === 'watermark' ? (
@@ -579,7 +579,7 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
                           );
                         }}
                         currentTime={currentTime}
-                        totalDuration={currentVideo.metadata.duration || 10}
+                        totalDuration={totalMergeDuration}
                         isPreviewMode={isInlinePreviewClean}
                       />
                     </>
@@ -733,7 +733,7 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
                           const hasTrim = !!item.trimConfig;
                           return (
                             <button
-                              key={item.id}
+                              key={item.video.id || `trim_clip_${idx}`}
                               type="button"
                               onClick={() => {
                                 setMergeItems((prev) =>

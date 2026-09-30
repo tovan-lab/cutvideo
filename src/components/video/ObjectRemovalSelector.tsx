@@ -265,7 +265,7 @@ export const ObjectRemovalSelector: React.FC<ObjectRemovalSelectorProps> = ({
                   const isSelected = config.targetClipIndex === idx;
                   return (
                     <button
-                      key={item.id}
+                      key={item.video?.id || `target_clip_${idx}`}
                       type="button"
                       onClick={() => onChange({ ...config, targetClipIndex: idx })}
                       className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all truncate max-w-[160px] ${
@@ -746,6 +746,22 @@ export const ObjectRemovalOverlay: React.FC<{
   const containerRef = useRef<HTMLDivElement>(null);
   const [activeAction, setActiveAction] = useState<'move' | 'nw' | 'ne' | 'se' | 'sw' | null>(null);
 
+  const startStateRef = useRef<{
+    pointerX: number;
+    pointerY: number;
+    boxX: number;
+    boxY: number;
+    boxW: number;
+    boxH: number;
+  }>({
+    pointerX: 0,
+    pointerY: 0,
+    boxX: config.area?.x ?? 70,
+    boxY: config.area?.y ?? 95.2,
+    boxW: config.area?.width ?? 28,
+    boxH: config.area?.height ?? 3.8,
+  });
+
   if (config.enabled === false) {
     return null;
   }
@@ -773,22 +789,6 @@ export const ObjectRemovalOverlay: React.FC<{
       </div>
     );
   }
-
-  const startStateRef = useRef<{
-    pointerX: number;
-    pointerY: number;
-    boxX: number;
-    boxY: number;
-    boxW: number;
-    boxH: number;
-  }>({
-    pointerX: 0,
-    pointerY: 0,
-    boxX: config.area.x,
-    boxY: config.area.y,
-    boxW: config.area.width,
-    boxH: config.area.height,
-  });
 
   const handlePointerDown = (action: 'move' | 'nw' | 'ne' | 'se' | 'sw', e: React.PointerEvent) => {
     e.stopPropagation();

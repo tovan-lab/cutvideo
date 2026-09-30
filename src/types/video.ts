@@ -318,3 +318,42 @@ export interface VideoOperationResult {
   engineUsed?: ProcessingEngineType;
   error?: string;
 }
+
+export const ALL_TRANSITIONS: Array<{
+  id: string;
+  name: string;
+  icon: string;
+  category: string;
+  desc: string;
+}> = [
+  { id: 'auto', name: 'Auto Smart Pool', icon: '🎲', category: 'Tự động', desc: 'Luân phiên đổi kiểu thông minh mượt mà' },
+  { id: 'fade', name: 'Fade (Mờ dần)', icon: '🌟', category: 'Kinh điển', desc: 'Mờ dần vào clip tiếp theo' },
+  { id: 'fadeblack', name: 'Fade Black', icon: '🖤', category: 'Điện ảnh', desc: 'Mờ qua đen phim ảnh sâu lắng' },
+  { id: 'fadewhite', name: 'Fade White', icon: '🤍', category: 'Sôi động', desc: 'Chớp sáng trắng nổi bật' },
+  { id: 'dissolve', name: 'Dissolve (Hòa tan)', icon: '🌊', category: 'Mềm mại', desc: 'Hòa tan đan xen giữa hai khung hình' },
+  { id: 'smoothleft', name: 'Smooth Left', icon: '⬅️', category: 'Lướt êm', desc: 'Lướt mềm sang trái tự nhiên' },
+  { id: 'smoothright', name: 'Smooth Right', icon: '➡️', category: 'Lướt êm', desc: 'Lướt mềm sang phải tự nhiên' },
+  { id: 'smoothup', name: 'Smooth Up', icon: '⬆️', category: 'Lướt êm', desc: 'Lướt mềm từ dưới lên trên' },
+  { id: 'smoothdown', name: 'Smooth Down', icon: '⬇️', category: 'Lướt êm', desc: 'Lướt mềm từ trên xuống dưới' },
+  { id: 'slideleft', name: 'Slide Left', icon: '⏪', category: 'Trượt cảnh', desc: 'Đẩy khung hình sang trái' },
+  { id: 'slideright', name: 'Slide Right', icon: '⏩', category: 'Trượt cảnh', desc: 'Đẩy khung hình sang phải' },
+  { id: 'slideup', name: 'Slide Up', icon: '🔼', category: 'Trượt cảnh', desc: 'Đẩy khung hình từ dưới lên' },
+  { id: 'slidedown', name: 'Slide Down', icon: '🔽', category: 'Trượt cảnh', desc: 'Đẩy khung hình từ trên xuống' },
+  { id: 'wipeleft', name: 'Wipe Left', icon: '🪟', category: 'Gạt hình', desc: 'Gạt màn hình từ phải sang trái' },
+  { id: 'wiperight', name: 'Wipe Right', icon: '🪟', category: 'Gạt hình', desc: 'Gạt màn hình từ trái sang phải' },
+  { id: 'wipeup', name: 'Wipe Up', icon: '🪟', category: 'Gạt hình', desc: 'Gạt màn hình từ dưới lên' },
+  { id: 'wipedown', name: 'Wipe Down', icon: '🪟', category: 'Gạt hình', desc: 'Gạt màn hình từ trên xuống' },
+  { id: 'circlecrop', name: 'Circle Crop', icon: '⭕', category: 'Hình học', desc: 'Thu tròn vào tâm như ống kính máy ảnh' },
+  { id: 'circleopen', name: 'Circle Open', icon: '🔘', category: 'Hình học', desc: 'Mở rộng vòng tròn từ tâm' },
+  { id: 'circleclose', name: 'Circle Close', icon: '🔴', category: 'Hình học', desc: 'Đóng vòng tròn từ ngoài vào tâm' },
+  { id: 'rectcrop', name: 'Rect Crop', icon: '🔲', category: 'Hình học', desc: 'Thu khung chữ nhật sắc nét' },
+  { id: 'zoomin', name: 'Zoom In', icon: '💥', category: 'Hiệu ứng', desc: 'Phóng to bùng nổ thu hút mắt' },
+  { id: 'pixelize', name: 'Pixelize', icon: '👾', category: 'Kỹ thuật số', desc: 'Hiệu ứng vỡ điểm ảnh pixel' },
+  { id: 'radial', name: 'Radial Clock', icon: '💫', category: 'Xoay quét', desc: 'Quét cánh quạt đồng hồ 360 độ' },
+  { id: 'hblur', name: 'H-Blur', icon: '🌫️', category: 'Làm mờ', desc: 'Làm mờ chuyển động theo chiều ngang' },
+  { id: 'squeezeh', name: 'Squeeze H', icon: '↔️', category: 'Co giãn', desc: 'Nén co giãn ngang đàn hồi' },
+  { id: 'squeezev', name: 'Squeeze V', icon: '↕️', category: 'Co giãn', desc: 'Nén co giãn dọc đàn hồi' },
+  { id: 'hlslice', name: 'H-Slice', icon: '🥢', category: 'Cắt lát', desc: 'Cắt lát song song theo sọc ngang' },
+  { id: 'distance', name: 'Distance 3D', icon: '🌌', category: 'Chiều sâu', desc: 'Lùi sâu vào không gian 3 chiều' },
+  { id: 'none', name: 'None (Cắt thẳng)', icon: '🎬', category: 'Cơ bản', desc: 'Cắt thẳng liền mạch không hiệu ứng' },
+];
