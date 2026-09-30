@@ -2,8 +2,8 @@
   "version": 2,
   "rewrites": [
     {
-      "source": "/((?!api/.*).*)",
-      "destination": "/index.html"
+      "source": "/api/ai-content/:action*",
+      "destination": "/api/ai-content?action=:action*"
     }
   ]
 }
