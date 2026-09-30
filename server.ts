@@ -6,6 +6,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { inpaintingRouter } from './server/routes/inpaintingRoutes';
 import { videoRouter } from './server/routes/videoRoutes';
+import { aiContentRouter } from './server/routes/aiContentRoutes';
 import { AI_CONFIG } from './server/config/aiConfig';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -18,6 +19,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 // Mount routers
 app.use('/api/inpainting', inpaintingRouter);
 app.use('/api/video', videoRouter);
+app.use('/api/ai-content', aiContentRouter);
 
 // Shared Gemini client setup
 function getGeminiClient() {

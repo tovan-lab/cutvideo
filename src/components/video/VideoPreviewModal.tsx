@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import {
   BoundingBox,
+  MergeItem,
   ObjectRemovalConfig,
   TextOverlayItem,
   TrimConfig,

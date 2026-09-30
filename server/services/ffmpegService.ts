@@ -1190,7 +1190,6 @@ export class ServerFFmpegService {
           filters.push(wmFilter);
         }
 
-        const effDuration = (trim?.enabled ? trim.endSec - trim.startSec : probe.duration) || probe.duration;
         const txtFilters = await buildTextFilters(width, height, effDuration);
         filters.push(...txtFilters);
 

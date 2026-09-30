@@ -4,37 +4,39 @@ import {
   RefreshCw,
   Copy,
   Check,
-  Video as VideoIcon,
-  MessageSquare,
-  Flame,
-  Briefcase,
-  Store,
-  BookOpen,
-  CheckCircle,
-  BrainCircuit,
-  Eye,
+  CheckCircle2,
   AlertCircle,
-  Loader2,
-  Newspaper,
-  Compass,
-  Mic,
-  Subtitles,
   HelpCircle,
+  Youtube,
+  Share2,
+  Hash,
+  Tag,
+  Search,
+  CheckCheck,
+  ChevronDown,
+  ChevronUp,
+  Sliders,
+  Radio,
+  FileText,
+  Clock,
+  ExternalLink,
+  ShieldCheck,
+  X,
+  Plus,
+  Loader2,
+  Tv,
 } from 'lucide-react';
-import {
-  AIContentPackage,
-  ContentGenerationRequest,
-  ContentTone,
-  Platform,
-  TargetLanguage,
-  VideoPurpose,
-  VideoTranscript,
-  VideoUnderstandingContext,
-} from '../../types/aiContent';
 import { VideoItem } from '../../types/video';
-import { aiContentService } from '../../services/aiContentService';
-import { ContentSection } from './ContentSection';
-import { TranscriptViewer } from './TranscriptViewer';
+import {
+  AIContentSEOProgress,
+  PlatformSEOItem,
+  SEOContentPackage,
+  SEOPlatform,
+  TitleTone,
+  VideoFacts,
+} from '../../lib/ai-content/types';
+import { PLATFORM_RULES, TITLE_TONE_GUIDELINES } from '../../lib/ai-content/platform-rules';
+import { aiContentClient } from '../../lib/ai-content/aiContentClient';
 
 interface AIContentPanelProps {
   selectedVideo: VideoItem | null;
@@ -47,695 +49,783 @@ export const AIContentPanel: React.FC<AIContentPanelProps> = ({
   onSeekVideo,
   onShowToast,
 }) => {
-  const [platform, setPlatform] = useState<Platform>('tiktok');
-  const [tone, setTone] = useState<ContentTone>('strong_hook');
-  const [language, setLanguage] = useState<TargetLanguage>('vi');
-  const [videoPurpose, setVideoPurpose] = useState<VideoPurpose>('knowledge');
-  const [userNotes, setUserNotes] = useState<string>('');
-  const [editedTranscript, setEditedTranscript] = useState<string>('');
-  // By default, skip speech/transcript to focus directly on visual understanding & trending metadata
-  const [skipSpeech, setSkipSpeech] = useState<boolean>(true);
+  // 1. Settings state
+  const [selectedPlatforms, setSelectedPlatforms] = useState<SEOPlatform[]>([
+    'youtube_long',
+    'tiktok',
+  ]);
+  const [titleTone, setTitleTone] = useState<TitleTone>('professional');
+  const [contentLanguage, setContentLanguage] = useState<'vi' | 'en'>('vi');
+  const [channelName, setChannelName] = useState<string>(() => {
+    return localStorage.getItem('ai_channel_name') || '';
+  });
+  const [primaryKeyword, setPrimaryKeyword] = useState<string>('');
+  const [userContext, setUserContext] = useState<string>('');
+  const [includeTranscript, setIncludeTranscript] = useState<boolean>(true);
 
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [generationStep, setGenerationStep] = useState<string>('');
-  const [generatedPackage, setGeneratedPackage] = useState<AIContentPackage | null>(null);
-  const [cachedContext, setCachedContext] = useState<VideoUnderstandingContext | null>(null);
-  const [activeTranscript, setActiveTranscript] = useState<VideoTranscript | null>(null);
-  const [copiedAll, setCopiedAll] = useState(false);
-  const [healthStatus, setHealthStatus] = useState<{ configured: boolean; model: string } | null>(null);
+  // 2. Generation & Progress state
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [progress, setProgress] = useState<AIContentSEOProgress | null>(null);
+  const [seoPackage, setSeoPackage] = useState<SEOContentPackage | null>(null);
+  const [activePlatformTab, setActivePlatformTab] = useState<SEOPlatform>('youtube_long');
 
-  // Check Gemini health on mount
+  // 3. UI interaction state
+  const [copiedItem, setCopiedItem] = useState<string | null>(null);
+  const [showFactDetails, setShowFactDetails] = useState(false);
+  const [newHashtagInput, setNewHashtagInput] = useState('');
+
+  // Persist channel name
   useEffect(() => {
-    aiContentService.checkHealth().then((status) => {
-      setHealthStatus(status);
-    });
-  }, []);
+    if (channelName) {
+      localStorage.setItem('ai_channel_name', channelName);
+    }
+  }, [channelName]);
 
-  // When video changes, clear previous results & context
+  // Clear when video changes
   useEffect(() => {
-    setGeneratedPackage(null);
-    setCachedContext(null);
-    setActiveTranscript(null);
-    setEditedTranscript('');
-    setUserNotes('');
-    setGenerationStep('');
+    setSeoPackage(null);
+    setProgress(null);
   }, [selectedVideo?.id]);
 
-  const platforms: Array<{ id: Platform; label: string; tag: string }> = [
-    { id: 'tiktok', label: 'TikTok', tag: 'Dọc 9:16 · Hook viral' },
-    { id: 'youtube', label: 'YouTube', tag: 'Ngang/Shorts · SEO' },
-    { id: 'facebook', label: 'Facebook', tag: 'Reels/Post · Chia sẻ' },
-    { id: 'instagram', label: 'Instagram', tag: 'Reels · Thẩm mỹ' },
-  ];
+  // Ensure active tab is within selected platforms
+  useEffect(() => {
+    if (seoPackage && !seoPackage.platforms[activePlatformTab]) {
+      const firstAvailable = Object.keys(seoPackage.platforms)[0] as SEOPlatform;
+      if (firstAvailable) setActivePlatformTab(firstAvailable);
+    }
+  }, [seoPackage, activePlatformTab]);
 
-  const purposes: Array<{ id: VideoPurpose; label: string; desc: string; icon: React.ReactNode }> = [
-    {
-      id: 'knowledge',
-      label: 'Giáo dục & Tips',
-      desc: 'Chia sẻ kiến thức, hướng dẫn thực tế',
-      icon: <BookOpen className="w-3.5 h-3.5 text-indigo-400" />,
-    },
-    {
-      id: 'entertainment',
-      label: 'Giải trí & Viral',
-      desc: 'Hài hước, kịch tính, thu hút giữ chân',
-      icon: <Flame className="w-3.5 h-3.5 text-amber-400" />,
-    },
-    {
-      id: 'review',
-      label: 'Review & Đánh giá',
-      desc: 'Trải nghiệm chân thực, ưu & nhược điểm',
-      icon: <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />,
-    },
-    {
-      id: 'vlog',
-      label: 'Vlog & Đời sống',
-      desc: 'Hành trình, du lịch, cảm xúc kết nối',
-      icon: <Compass className="w-3.5 h-3.5 text-sky-400" />,
-    },
-    {
-      id: 'commercial',
-      label: 'Bán hàng & Tiếp thị',
-      desc: 'Nêu vấn đề, giới thiệu sản phẩm & ưu đãi',
-      icon: <Store className="w-3.5 h-3.5 text-pink-400" />,
-    },
-    {
-      id: 'news',
-      label: 'Tin tức & Sự kiện',
-      desc: 'Thông tin nhanh, sự kiện nóng, khách quan',
-      icon: <Newspaper className="w-3.5 h-3.5 text-teal-400" />,
-    },
-  ];
+  const togglePlatform = (p: SEOPlatform) => {
+    if (selectedPlatforms.includes(p)) {
+      if (selectedPlatforms.length === 1) {
+        onShowToast('Cần chọn ít nhất một nền tảng.', 'info');
+        return;
+      }
+      setSelectedPlatforms(selectedPlatforms.filter((item) => item !== p));
+    } else {
+      setSelectedPlatforms([...selectedPlatforms, p]);
+    }
+  };
 
-  const tones: Array<{ id: ContentTone; label: string; desc: string; icon: React.ReactNode }> = [
-    {
-      id: 'strong_hook',
-      label: 'Hook mạnh',
-      desc: '3 giây đầu giật gân, giữ chân người xem',
-      icon: <Flame className="w-3.5 h-3.5 text-amber-400" />,
-    },
-    {
-      id: 'natural',
-      label: 'Tự nhiên',
-      desc: 'Thân thiện, gần gũi như trò chuyện',
-      icon: <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />,
-    },
-    {
-      id: 'genz',
-      label: 'Gen Z',
-      desc: 'Ngôn từ bắt trend, năng động, cuốn hút',
-      icon: <Sparkles className="w-3.5 h-3.5 text-pink-400" />,
-    },
-    {
-      id: 'professional',
-      label: 'Chuyên nghiệp',
-      desc: 'Uy tín, học thuật, đáng tin cậy',
-      icon: <Briefcase className="w-3.5 h-3.5 text-sky-400" />,
-    },
-    {
-      id: 'review',
-      label: 'Review',
-      desc: 'Đánh giá khách quan, nêu ưu nhược điểm',
-      icon: <CheckCircle className="w-3.5 h-3.5 text-teal-400" />,
-    },
-    {
-      id: 'sales',
-      label: 'Bán hàng',
-      desc: 'Tập trung lợi ích & thúc đẩy chuyển đổi',
-      icon: <Store className="w-3.5 h-3.5 text-indigo-400" />,
-    },
-    {
-      id: 'storytelling',
-      label: 'Storytelling',
-      desc: 'Dẫn dắt bằng câu chuyện chạm cảm xúc',
-      icon: <BookOpen className="w-3.5 h-3.5 text-violet-400" />,
-    },
-  ];
+  const handleCopy = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedItem(label);
+    onShowToast(`Đã sao chép ${label}!`, 'success');
+    setTimeout(() => setCopiedItem(null), 2000);
+  };
 
-  const handleGenerate = async () => {
+  // Main generation flow: 4 strictly executed steps
+  const handleStartAnalysis = async () => {
     if (!selectedVideo) {
-      onShowToast('Vui lòng chọn hoặc tải lên một video trước khi tạo nội dung.', 'error');
+      onShowToast('Vui lòng chọn hoặc tải video lên trước.', 'error');
       return;
     }
 
-    try {
-      setIsGenerating(true);
+    if (selectedPlatforms.length === 0) {
+      onShowToast('Vui lòng chọn ít nhất một nền tảng đăng.', 'error');
+      return;
+    }
 
-      // Step 1: Multimodal Video Understanding (Audio Transcript + Visual Frames or Visual-first)
-      let context = cachedContext;
-      if (!context || context.videoPurpose !== videoPurpose || userNotes !== context.userNotes) {
-        setGenerationStep(
-          skipSpeech
-            ? 'Đang trích xuất khung hình & xem video để bắt trend...'
-            : 'Đang phân tích âm thanh & thị giác video...'
-        );
-        context = await aiContentService.analyzeVideo(selectedVideo, {
-          transcript: skipSpeech ? undefined : (activeTranscript || undefined),
-          videoPurpose,
-          userNotes,
-          skipTranscript: skipSpeech,
-          onProgress: (stepMsg) => setGenerationStep(stepMsg),
-        });
-        setCachedContext(context);
-        if (context.transcript && !skipSpeech) {
-          setActiveTranscript(context.transcript);
+    setIsProcessing(true);
+    setProgress({ step: 'reading_video', message: 'Bắt đầu quy trình phân tích...', percent: 5 });
+
+    try {
+      // Step 0: Upload video to temp server endpoint
+      const uploadResult = await aiContentClient.uploadVideo(selectedVideo, setProgress);
+
+      // Step 1: Gemini Files API reads full video -> Video Facts
+      const facts = await aiContentClient.extractVideoFacts(
+        uploadResult.filePath,
+        uploadResult.originalName,
+        uploadResult.mimeType,
+        setProgress
+      );
+
+      // Auto-fill channel name if detected in video entities
+      if (!channelName && facts.entities.some((e) => e.type === 'channel')) {
+        const found = facts.entities.find((e) => e.type === 'channel');
+        if (found?.name) {
+          setChannelName(found.name);
+          localStorage.setItem('ai_channel_name', found.name);
         }
-      } else {
-        setGenerationStep('Tái sử dụng bối cảnh phân tích video từ bộ nhớ phiên...');
       }
 
-      // Step 2: Content Generation via Gemini Multimodal with Retry & Fallback
-      setGenerationStep(`Gemini AI đang kết hợp nội dung video và xu hướng hot để tạo tiêu đề, mô tả & hashtag...`);
-      const req: ContentGenerationRequest = {
-        videoId: selectedVideo.id,
-        videoName: selectedVideo.name,
-        durationSeconds: selectedVideo.metadata.duration,
-        platform,
-        tone,
-        language,
-        videoPurpose,
-        userNotes,
-        editedTranscript: skipSpeech ? undefined : (editedTranscript || undefined),
-      };
-
-      const result = await aiContentService.generateContentPackage(req, context);
-      setGeneratedPackage(result);
-      onShowToast('Đã rút ra tiêu đề, mô tả và hashtag xu hướng thành công!', 'success');
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Quá trình tạo nội dung gặp lỗi.';
-      onShowToast(msg, 'error');
-    } finally {
-      setIsGenerating(false);
-      setGenerationStep('');
-    }
-  };
-
-  const handleRegenerate = async () => {
-    if (!selectedVideo || !cachedContext) {
-      handleGenerate();
-      return;
-    }
-
-    try {
-      setIsGenerating(true);
-      setGenerationStep('Đang tạo biến thể nội dung mới...');
-      const req: ContentGenerationRequest = {
-        videoId: selectedVideo.id,
-        videoName: selectedVideo.name,
-        durationSeconds: selectedVideo.metadata.duration,
-        platform,
-        tone,
-        language,
-        videoPurpose,
-        userNotes,
-        editedTranscript: editedTranscript || undefined,
-      };
-
-      const result = await aiContentService.generateContentPackage(req, cachedContext);
-      setGeneratedPackage(result);
-      onShowToast('Đã làm mới nội dung thành công!', 'success');
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Không thể làm mới nội dung.';
-      onShowToast(msg, 'error');
-    } finally {
-      setIsGenerating(false);
-      setGenerationStep('');
-    }
-  };
-
-  const handleCopySingle = async (text: string, label: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      onShowToast(`Đã sao chép ${label}!`, 'success');
-    } catch {
-      onShowToast('Không thể sao chép vào clipboard.', 'error');
-    }
-  };
-
-  const handleCopyAll = async () => {
-    if (!generatedPackage) return;
-
-    const sections: string[] = [
-      `【TIÊU ĐỀ VIDEO CHÍNH】\n${generatedPackage.title}`,
-    ];
-
-    if (generatedPackage.alternativeTitles && generatedPackage.alternativeTitles.length > 0) {
-      sections.push(
-        `【CÁC TIÊU ĐỀ BẮT TREND THAY THẾ】\n` +
-          generatedPackage.alternativeTitles.map((t, i) => `${i + 1}. ${t}`).join('\n')
+      // Step 2: Real Keyword Research (YouTube + Google Suggest + Top videos)
+      const keywordResearch = await aiContentClient.researchKeywords(
+        facts,
+        channelName,
+        primaryKeyword,
+        setProgress
       );
-    }
 
-    sections.push(
-      `【HOOK 3S MỞ ĐẦU CHẶN LƯỚT】\n${generatedPackage.introduction}`,
-      `【MÔ TẢ / CAPTION BẮT TREND】\n${generatedPackage.description}`,
-      `【HASHTAGS THỊNH HÀNH】\n${generatedPackage.hashtags.join(' ')}`,
-      `【KÊU GỌI HÀNH ĐỘNG (CTA)】\n${generatedPackage.cta}`
-    );
+      // Step 3 & 4: Multi-platform generation and fact checking
+      const finalPackage = await aiContentClient.generateSEOPackage(
+        {
+          videoFacts: facts,
+          selectedPlatforms,
+          keywordResearch,
+          channelName,
+          primaryKeyword,
+          userContext,
+          titleTone,
+          includeTranscript,
+        },
+        setProgress
+      );
 
-    if (generatedPackage.trendTip) {
-      sections.push(`【MẸO XU HƯỚNG & ÂM THANH】\n${generatedPackage.trendTip}`);
-    }
-
-    const fullContent = sections.join('\n\n');
-
-    try {
-      await navigator.clipboard.writeText(fullContent);
-      setCopiedAll(true);
-      onShowToast('Đã sao chép toàn bộ tiêu đề, mô tả và hashtag vào clipboard!', 'success');
-      setTimeout(() => setCopiedAll(false), 2000);
-    } catch {
-      onShowToast('Không thể sao chép vào clipboard.', 'error');
-    }
-  };
-
-  const handleTranscriptEdited = (newFullText: string) => {
-    setEditedTranscript(newFullText);
-    if (cachedContext) {
-      const updated = { ...cachedContext, editedTranscript: newFullText };
-      setCachedContext(updated);
-      aiContentService.updateCachedContext(selectedVideo?.id || '', { editedTranscript: newFullText });
-    }
-    onShowToast('Đã lưu transcript đã chỉnh sửa. Bấm "Tạo lại" để cập nhật kịch bản.', 'info');
-  };
-
-  const handleNotesUpdated = (notes: string) => {
-    setUserNotes(notes);
-    if (cachedContext) {
-      const updated = { ...cachedContext, userNotes: notes };
-      setCachedContext(updated);
-      aiContentService.updateCachedContext(selectedVideo?.id || '', { userNotes: notes });
+      setSeoPackage(finalPackage);
+      setActivePlatformTab(selectedPlatforms[0]);
+      onShowToast('Đã tạo thành công nội dung SEO bám sát 100% video!', 'success');
+    } catch (err: any) {
+      console.error('[AIContentPanel] Error during SEO generation:', err);
+      onShowToast(err.message || 'Đã có lỗi xảy ra trong quá trình phân tích.', 'error');
+    } finally {
+      setIsProcessing(false);
     }
   };
+
+  const currentPlatformData: PlatformSEOItem | undefined = seoPackage?.platforms[activePlatformTab];
+
+  // Helper to update current platform data locally
+  const updateCurrentPlatform = (updater: (prev: PlatformSEOItem) => PlatformSEOItem) => {
+    if (!seoPackage || !currentPlatformData) return;
+    const updated = updater(currentPlatformData);
+    setSeoPackage({
+      ...seoPackage,
+      platforms: {
+        ...seoPackage.platforms,
+        [activePlatformTab]: updated,
+      },
+    });
+  };
+
+  const handleSelectTitle = (idx: number) => {
+    updateCurrentPlatform((prev) => ({ ...prev, selectedTitleIndex: idx }));
+  };
+
+  const handleRemoveHashtag = (tagToRemove: string) => {
+    updateCurrentPlatform((prev) => ({
+      ...prev,
+      hashtags: prev.hashtags.filter((h) => h !== tagToRemove),
+    }));
+  };
+
+  const handleAddHashtag = () => {
+    if (!newHashtagInput.trim()) return;
+    let clean = newHashtagInput.trim().replace(/\s+/g, '');
+    if (!clean.startsWith('#')) clean = `#${clean}`;
+    updateCurrentPlatform((prev) => ({
+      ...prev,
+      hashtags: prev.hashtags.includes(clean) ? prev.hashtags : [...prev.hashtags, clean],
+    }));
+    setNewHashtagInput('');
+  };
+
+  const handleCopyAllForPlatform = () => {
+    if (!currentPlatformData) return;
+    const title = currentPlatformData.titles[currentPlatformData.selectedTitleIndex] || currentPlatformData.titles[0];
+    const textToCopy = `${title}\n\n${currentPlatformData.description}\n\n${currentPlatformData.hashtags.join(' ')}`;
+    handleCopy(textToCopy, `toàn bộ nội dung ${PLATFORM_RULES[activePlatformTab].name}`);
+  };
+
+  const platformsConfig: Array<{ id: SEOPlatform; label: string; icon: string; sub: string }> = [
+    { id: 'youtube_long', label: 'YouTube Video Dài', icon: '📺', sub: 'Chuẩn SEO, 100 ký tự, thẻ tags' },
+    { id: 'youtube_shorts', label: 'YouTube Shorts', icon: '⚡', sub: 'Dọc, ≤60 ký tự, #shorts' },
+    { id: 'tiktok', label: 'TikTok', icon: '🎵', sub: 'Hook 3s, 100-300 ký tự' },
+    { id: 'facebook', label: 'Facebook', icon: '📘', sub: 'Reels / Post, câu hỏi mở' },
+    { id: 'instagram', label: 'Instagram', icon: '📸', sub: 'Reels / Feed, thẩm mỹ cao' },
+  ];
+
+  const toneOptions: Array<{ id: TitleTone; label: string; desc: string }> = [
+    { id: 'professional', label: 'Chuyên nghiệp', desc: 'Chuẩn mực, uy tín, chính xác' },
+    { id: 'curiosity', label: 'Tò mò / Câu hỏi', desc: 'Kích thích khám phá, khoảng trống thông tin' },
+    { id: 'numbers', label: 'Con số nổi bật', desc: 'Số liệu, thời gian, sự kiện cụ thể' },
+    { id: 'natural', label: 'Tự nhiên', desc: 'Gần gũi, đời thường như trò chuyện' },
+  ];
 
   return (
-    <div className="space-y-4 sm:space-y-5">
-      {/* Model & Architecture Status Banner */}
-      <div className="glass-panel-subtle flex flex-wrap items-center justify-between gap-2 p-3 rounded-2xl border border-slate-800/80 text-xs">
-        <div className="flex items-center gap-2 text-slate-300">
-          <BrainCircuit className="w-4 h-4 text-indigo-400 shrink-0" />
-          <span>Trí tuệ nhân tạo:</span>
-          <strong className="text-white font-mono">Gemini Multimodal (Smart Fallback & Retry)</strong>
-          <span aria-hidden="true" className="text-slate-600 hidden sm:inline">·</span>
-          <span className="text-emerald-400 font-medium hidden sm:inline">Thị giác trực quan & Bắt Trend</span>
-        </div>
-
-        {healthStatus && !healthStatus.configured && (
-          <div className="flex items-center gap-1.5 text-[11px] text-amber-400 font-medium">
-            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-            <span>Chưa cấu hình GEMINI_API_KEY trong .env</span>
-          </div>
-        )}
-      </div>
-
-      {/* Configuration Box */}
-      <div className="glass-panel rounded-3xl p-3.5 sm:p-5 space-y-4 shadow-xl shadow-black/40 border border-slate-800/80">
-        {/* Dedicated Option: Skip Speech / Visual-First & Hot Trends */}
-        <div className="p-3.5 rounded-2xl bg-gradient-to-r from-indigo-950/40 via-purple-950/30 to-slate-900/60 border border-indigo-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-inner">
-          <div className="flex items-start sm:items-center gap-2.5">
-            <div className={`p-2 rounded-xl mt-0.5 sm:mt-0 ${skipSpeech ? 'bg-indigo-600/30 text-indigo-300' : 'bg-slate-800 text-slate-400'}`}>
-              <Eye className="w-4 h-4" />
+    <div className="space-y-4">
+      {/* Configuration Card */}
+      <div className="glass-panel rounded-3xl p-4 sm:p-6 space-y-5 shadow-xl shadow-black/40 border border-slate-800">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-indigo-950/70 border border-indigo-700/50 flex items-center justify-center text-indigo-400">
+              <Sparkles className="w-4 h-4" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-white">Chế độ xem video & Bắt trend siêu tốc</span>
-                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                  Khuyên dùng
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-300 leading-snug mt-0.5">
-                Bỏ qua bóc lời thoại — AI trực tiếp quan sát các khung hình, nắm bắt chủ thể & phối hợp các xu hướng hot nhất để tạo tiêu đề, mô tả và hashtag.
+              <h3 className="text-sm font-bold text-white tracking-wide">
+                Trí Tuệ Nhân Tạo: Phân Tích & Tối Ưu SEO Đa Nền Tảng
+              </h3>
+              <p className="text-[11px] text-slate-400">
+                Đọc nguyên bản video (hình ảnh + âm thanh) qua Gemini Files API, nghiên cứu từ khóa thật, không bịa đặt.
               </p>
             </div>
           </div>
-
-          <label className="relative inline-flex items-center cursor-pointer select-none shrink-0 self-end sm:self-center">
-            <input
-              type="checkbox"
-              checked={skipSpeech}
-              onChange={(e) => {
-                setSkipSpeech(e.target.checked);
-                setCachedContext(null); // Clear cache so new choice applies
-              }}
-              className="sr-only peer"
-            />
-            <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
-            <span className="ml-2.5 text-xs font-semibold text-slate-200">
-              {skipSpeech ? 'Đang bỏ qua lời thoại' : 'Kèm bóc lời thoại'}
-            </span>
-          </label>
         </div>
 
-        {/* Row 0: Video Purpose Selection */}
+        {/* 1. Multi-Platform Selection */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-300 block">
-              1. Mục đích Video (Video Purpose)
-            </span>
-            <span className="text-[11px] text-slate-500">
-              Định hướng thông điệp và kịch bản video
+            <label className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+              <span>1. Nền tảng đăng tải:</span>
+              <span className="text-[10px] text-indigo-400 font-normal">(Có thể chọn nhiều nền tảng cùng lúc)</span>
+            </label>
+            <span className="text-[11px] text-slate-400">
+              Đã chọn: <strong className="text-white">{selectedPlatforms.length}</strong> nền tảng
             </span>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {purposes.map((p) => {
-              const isSelected = videoPurpose === p.id;
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+            {platformsConfig.map((p) => {
+              const isSelected = selectedPlatforms.includes(p.id);
               return (
                 <button
                   key={p.id}
                   type="button"
-                  onClick={() => setVideoPurpose(p.id)}
-                  className={`p-2.5 rounded-xl border text-left transition-all ${
+                  onClick={() => togglePlatform(p.id)}
+                  className={`p-2.5 rounded-2xl border text-left transition-all relative flex flex-col justify-between ${
                     isSelected
-                      ? 'bg-indigo-600/20 border-indigo-500/60 text-white shadow-xs'
-                      : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                      ? 'bg-indigo-950/50 border-indigo-500 text-white shadow-md shadow-indigo-500/10'
+                      : 'bg-slate-950/40 border-slate-800 text-slate-400 hover:border-slate-700'
                   }`}
                 >
-                  <div className="flex items-center gap-1.5 mb-1">
-                    {p.icon}
-                    <span className="text-xs font-semibold">{p.label}</span>
+                  <div className="flex items-center justify-between gap-1 mb-1">
+                    <span className="text-base">{p.icon}</span>
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => {}}
+                      className="rounded accent-indigo-500 cursor-pointer pointer-events-none"
+                    />
                   </div>
-                  <p className="text-[10px] text-slate-500 leading-tight truncate">
-                    {p.desc}
-                  </p>
+                  <div>
+                    <p className="text-xs font-bold leading-tight truncate">{p.label}</p>
+                    <p className="text-[10px] text-slate-400 line-clamp-1 mt-0.5">{p.sub}</p>
+                  </div>
                 </button>
               );
             })}
           </div>
         </div>
 
-        {/* Row 1: Platform & Language */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1 border-t border-slate-800/80">
-          {/* Platform Selector */}
-          <div className="space-y-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-300 block">
-              2. Nền tảng (Platform)
-            </span>
-            <div className="grid grid-cols-2 gap-1.5">
-              {platforms.map((p) => {
-                const isSelected = platform === p.id;
+        {/* 2. Channel Name, Keyword & Context Inputs */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
+              <span>Tên kênh:</span>
+              <span className="text-[10px] text-slate-500 font-mono">Tự lưu</span>
+            </label>
+            <input
+              type="text"
+              placeholder="VD: Kinh Tế 8 Phút, Tóm Tắt Nhanh..."
+              value={channelName}
+              onChange={(e) => setChannelName(e.target.value)}
+              className="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-300">
+              Từ khóa chính (tùy chọn):
+            </label>
+            <input
+              type="text"
+              placeholder="VD: giá vàng, chứng khoán, du lịch..."
+              value={primaryKeyword}
+              onChange={(e) => setPrimaryKeyword(e.target.value)}
+              className="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-300">
+              Bối cảnh thêm (tùy chọn):
+            </label>
+            <input
+              type="text"
+              placeholder="VD: Màn hình cảm ơn cuối video, giảm giá 20%..."
+              value={userContext}
+              onChange={(e) => setUserContext(e.target.value)}
+              className="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none"
+            />
+          </div>
+        </div>
+
+        {/* 3. Title Tone & Content Language */}
+        <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 pt-1">
+          {/* Title Tone */}
+          <div className="sm:col-span-8 space-y-1.5">
+            <label className="text-xs font-bold text-slate-200 uppercase tracking-wider block">
+              2. Giọng văn tiêu đề:
+            </label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+              {toneOptions.map((t) => {
+                const isSel = titleTone === t.id;
                 return (
                   <button
-                    key={p.id}
+                    key={t.id}
                     type="button"
-                    onClick={() => setPlatform(p.id)}
-                    className={`min-h-[44px] px-3 py-2 rounded-xl text-left border text-xs font-medium transition-all ${
-                      isSelected
-                        ? 'bg-indigo-600/20 border-indigo-500/60 text-white shadow-xs'
-                        : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                    onClick={() => setTitleTone(t.id)}
+                    className={`p-2 rounded-xl border text-left transition-all ${
+                      isSel
+                        ? 'bg-indigo-600/30 border-indigo-500 text-white ring-1 ring-indigo-400 font-semibold'
+                        : 'bg-slate-900/60 border-slate-800 text-slate-300 hover:border-slate-700'
                     }`}
                   >
-                    <div className="font-semibold">{p.label}</div>
-                    <div className="text-[10px] text-slate-500 truncate">{p.tag}</div>
+                    <p className="text-xs leading-tight">{t.label}</p>
+                    <p className="text-[10px] text-slate-400 truncate mt-0.5">{t.desc}</p>
                   </button>
                 );
               })}
             </div>
           </div>
 
-          {/* Language Selector */}
-          <div className="space-y-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-300 block">
-              3. Ngôn ngữ kịch bản (Language)
-            </span>
-            <div className="grid grid-cols-2 gap-2">
+          {/* Language & Transcript Switch */}
+          <div className="sm:col-span-4 space-y-1.5">
+            <label className="text-xs font-bold text-slate-200 uppercase tracking-wider block">
+              3. Ngôn ngữ nội dung:
+            </label>
+            <div className="grid grid-cols-2 gap-1.5">
               <button
                 type="button"
-                onClick={() => setLanguage('vi')}
-                className={`min-h-[44px] flex items-center justify-center gap-2 px-3 py-2 rounded-xl border text-xs font-medium transition-all ${
-                  language === 'vi'
-                    ? 'bg-indigo-600/20 border-indigo-500/60 text-white shadow-xs'
-                    : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200'
+                onClick={() => setContentLanguage('vi')}
+                className={`py-1.5 px-2 rounded-xl text-xs font-medium border text-center transition-all ${
+                  contentLanguage === 'vi'
+                    ? 'bg-indigo-600 text-white border-indigo-400 font-semibold'
+                    : 'bg-slate-900 text-slate-400 border-slate-800'
                 }`}
               >
-                <span>🇻🇳 Tiếng Việt</span>
+                🇻🇳 Tiếng Việt
               </button>
               <button
                 type="button"
-                onClick={() => setLanguage('en')}
-                className={`min-h-[44px] flex items-center justify-center gap-2 px-3 py-2 rounded-xl border text-xs font-medium transition-all ${
-                  language === 'en'
-                    ? 'bg-indigo-600/20 border-indigo-500/60 text-white shadow-xs'
-                    : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200'
+                onClick={() => setContentLanguage('en')}
+                className={`py-1.5 px-2 rounded-xl text-xs font-medium border text-center transition-all ${
+                  contentLanguage === 'en'
+                    ? 'bg-indigo-600 text-white border-indigo-400 font-semibold'
+                    : 'bg-slate-900 text-slate-400 border-slate-800'
                 }`}
               >
-                <span>🇬🇧 English</span>
+                🇬🇧 English
               </button>
             </div>
 
-            <p className="text-[11px] text-slate-500 mt-2">
-              Kịch bản được tối ưu văn phong bản địa, bắt trúng xu hướng và thuật toán.
-            </p>
+            {/* Transcript switch */}
+            <div className="pt-1">
+              <label className="flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={includeTranscript}
+                  onChange={(e) => setIncludeTranscript(e.target.checked)}
+                  className="rounded accent-indigo-500 cursor-pointer"
+                />
+                <span>Kèm bóc lời thoại (Mặc định bật)</span>
+              </label>
+            </div>
           </div>
         </div>
 
-        {/* Row 2: Tone / Style */}
-        <div className="space-y-2 pt-1 border-t border-slate-800/80">
-          <span className="text-xs font-semibold uppercase tracking-wider text-slate-300 block">
-            4. Phong cách / Tông giọng (Tone & Style)
-          </span>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-            {tones.map((t) => {
-              const isSelected = tone === t.id;
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => setTone(t.id)}
-                  className={`p-2.5 rounded-xl border text-left transition-all ${
-                    isSelected
-                      ? 'bg-indigo-600/20 border-indigo-500/60 text-white shadow-xs'
-                      : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5 mb-1">
-                    {t.icon}
-                    <span className="text-xs font-semibold">{t.label}</span>
-                  </div>
-                  <p className="text-[10px] text-slate-500 leading-tight truncate">
-                    {t.desc}
-                  </p>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Actions Button */}
-        <div className="pt-2 flex flex-wrap items-center justify-between gap-3 border-t border-slate-800/60">
-          <div className="text-[11px] text-slate-400">
-            {selectedVideo ? (
-              <span>
-                Video: <strong className="text-slate-200">{selectedVideo.name}</strong>
-                {cachedContext && (
-                  <span className="ml-2 text-indigo-400 font-medium">
-                    (Đã phân tích bối cảnh)
-                  </span>
-                )}
-              </span>
+        {/* Action Button & Step Progress */}
+        <div className="pt-2 border-t border-slate-800/80 space-y-3">
+          <button
+            type="button"
+            disabled={isProcessing || !selectedVideo}
+            onClick={handleStartAnalysis}
+            className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold text-sm shadow-lg shadow-indigo-600/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer active:scale-[0.99]"
+          >
+            {isProcessing ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Đang phân tích & tối ưu SEO...</span>
+              </>
             ) : (
-              <span className="text-amber-400/80">Chưa chọn video</span>
+              <>
+                <Sparkles className="w-4 h-4" />
+                <span>Phân tích & Tạo nội dung SEO</span>
+              </>
             )}
-          </div>
+          </button>
 
-          <div className="flex items-center gap-2">
-            {generatedPackage && (
-              <button
-                type="button"
-                disabled={isGenerating}
-                onClick={handleRegenerate}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors disabled:opacity-50"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isGenerating ? 'animate-spin' : ''}`} />
-                <span>Tạo lại</span>
-              </button>
-            )}
-
-            <button
-              type="button"
-              disabled={isGenerating || !selectedVideo}
-              onClick={handleGenerate}
-              className="relative group min-h-[44px] flex items-center justify-center gap-2 px-5 py-2.5 rounded-2xl text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:opacity-40 shadow-xl shadow-indigo-600/35 ring-1 ring-white/20 transition-all hover:scale-[1.02] active:scale-[0.98] overflow-hidden"
-            >
-              <Sparkles className={`w-4 h-4 text-amber-300 ${isGenerating ? 'animate-spin' : ''}`} />
-              <span>
-                {isGenerating
-                  ? 'Đang quan sát & bắt trend...'
-                  : skipSpeech
-                  ? '⚡ Xem video & Rút tiêu đề, mô tả, hashtag xu hướng'
-                  : 'Phân tích & Tạo nội dung'}
-              </span>
-            </button>
-          </div>
-        </div>
-
-        {/* Live Processing Stage Feedback */}
-        {isGenerating && generationStep && (
-          <div className="p-3 bg-indigo-950/40 border border-indigo-800/40 rounded-xl flex items-center gap-2.5 text-xs text-indigo-200 animate-pulse">
-            <Loader2 className="w-4 h-4 text-indigo-400 animate-spin shrink-0" />
-            <span>{generationStep}</span>
-          </div>
-        )}
-      </div>
-
-      {/* Transcript Viewer (Only shown if speech transcription is explicitly enabled and detected) */}
-      {!skipSpeech && (cachedContext?.transcript?.hasSpeech || activeTranscript?.hasSpeech) && (
-        <TranscriptViewer
-          transcript={activeTranscript || cachedContext?.transcript}
-          context={cachedContext}
-          videoTitle={selectedVideo?.name}
-          onSeek={onSeekVideo}
-          onUpdateTranscript={handleTranscriptEdited}
-          onUpdateUserNotes={handleNotesUpdated}
-        />
-      )}
-
-      {/* Generated Social Media Results */}
-      {generatedPackage ? (
-        <div className="space-y-3.5 animate-in fade-in duration-300">
-          {/* Top Bar for Results */}
-          <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-900/90 border border-slate-800 rounded-xl px-4 py-2.5">
-            <div className="flex items-center gap-2 text-xs">
-              <span className="font-semibold text-white">Nội dung đề xuất:</span>
-              <span className="text-slate-400 capitalize">{generatedPackage.platform}</span>
-              <span aria-hidden="true" className="text-slate-600">·</span>
-              <span className="text-indigo-400 capitalize">{generatedPackage.tone}</span>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleCopyAll}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                copiedAll
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm'
-              }`}
-            >
-              {copiedAll ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-              <span>{copiedAll ? 'Đã sao chép tất cả!' : 'Sao chép tất cả (Tiêu đề + Caption + Hashtags)'}</span>
-            </button>
-          </div>
-
-          {/* Section 1: Title & Alternative Viral Titles */}
-          <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-3.5 space-y-3 transition-all hover:border-slate-700/80">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-baseline gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-                  1. Tiêu đề Viral (Title)
+          {/* 4-Step Progress Indicator */}
+          {isProcessing && progress && (
+            <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-3.5 space-y-2.5 animate-in fade-in">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-indigo-300 flex items-center gap-1.5">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />
+                  {progress.message}
                 </span>
-                <span className="text-[11px] text-slate-500">
-                  Chuẩn CTR & kích thích tò mò giữ chân người xem
-                </span>
+                <span className="font-mono text-indigo-400 font-bold">{progress.percent}%</span>
               </div>
 
-              <button
-                type="button"
-                onClick={() => handleCopySingle(generatedPackage.title, 'Tiêu đề chính')}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700 transition-all"
-              >
-                <Copy className="w-3.5 h-3.5" />
-                <span>Sao chép tiêu đề</span>
-              </button>
-            </div>
-
-            {/* Main Title Banner */}
-            <div className="p-3 bg-gradient-to-r from-indigo-950/40 via-purple-950/30 to-slate-900/60 border border-indigo-500/40 rounded-xl">
-              <div className="text-sm font-bold text-white leading-relaxed">
-                {generatedPackage.title}
+              {/* Progress Bar */}
+              <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all duration-300"
+                  style={{ width: `${progress.percent}%` }}
+                />
               </div>
-            </div>
 
-            {/* Alternative Titles List */}
-            {generatedPackage.alternativeTitles && generatedPackage.alternativeTitles.length > 0 && (
-              <div className="space-y-1.5 pt-1">
-                <span className="text-[11px] font-semibold text-slate-400 flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 text-amber-400" />
-                  Các phương án giật tít bắt trend thay thế:
-                </span>
-                <div className="space-y-1.5">
-                  {generatedPackage.alternativeTitles.map((altTitle, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-center justify-between gap-2 p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 hover:border-slate-700 text-xs text-slate-300 transition-all group"
-                    >
-                      <span className="leading-snug">{altTitle}</span>
-                      <button
-                        type="button"
-                        onClick={() => handleCopySingle(altTitle, `Tiêu đề ${idx + 1}`)}
-                        className="shrink-0 p-1 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition-all opacity-80 group-hover:opacity-100"
-                        title="Sao chép tiêu đề này"
-                      >
-                        <Copy className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))}
+              {/* 4 Steps Checklist */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[11px]">
+                <div className={`flex items-center gap-1.5 ${progress.percent >= 25 ? 'text-emerald-400' : 'text-slate-500'}`}>
+                  <CheckCheck className="w-3.5 h-3.5 shrink-0" />
+                  <span>1. Đọc video (Facts)</span>
+                </div>
+                <div className={`flex items-center gap-1.5 ${progress.percent >= 50 ? 'text-emerald-400' : 'text-slate-500'}`}>
+                  <CheckCheck className="w-3.5 h-3.5 shrink-0" />
+                  <span>2. Nghiên cứu từ khóa</span>
+                </div>
+                <div className={`flex items-center gap-1.5 ${progress.percent >= 75 ? 'text-emerald-400' : 'text-slate-500'}`}>
+                  <CheckCheck className="w-3.5 h-3.5 shrink-0" />
+                  <span>3. Viết nội dung</span>
+                </div>
+                <div className={`flex items-center gap-1.5 ${progress.percent >= 95 ? 'text-emerald-400' : 'text-slate-500'}`}>
+                  <CheckCheck className="w-3.5 h-3.5 shrink-0" />
+                  <span>4. Kiểm tra độ khớp</span>
                 </div>
               </div>
-            )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Video Ground Truth Banner (if facts available) */}
+      {seoPackage && (
+        <div className="p-3.5 rounded-2xl bg-indigo-950/40 border border-indigo-700/40 text-xs text-indigo-200 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+            <div>
+              <p className="font-semibold text-white">
+                Bản chất video: <span className="uppercase text-amber-300">{seoPackage.videoFacts.video_type}</span>
+                {seoPackage.videoFacts.entities.some((e) => e.type === 'channel') && (
+                  <span className="text-slate-300 ml-1">
+                    · Kênh:{' '}
+                    <strong className="text-white">
+                      {seoPackage.videoFacts.entities.find((e) => e.type === 'channel')?.name}
+                    </strong>
+                  </span>
+                )}
+              </p>
+              <p className="text-[11px] text-slate-300">{seoPackage.videoFacts.summary}</p>
+            </div>
           </div>
 
-          {/* Section 2: Introduction Hook */}
-          <ContentSection
-            label="2. Kịch bản mở đầu (3s Hook)"
-            sublabel="Khớp với hình ảnh mở màn video để chặn lướt"
-            content={generatedPackage.introduction}
-            onCopyNotice={(t) => onShowToast(t, 'success')}
-          />
+          <button
+            type="button"
+            onClick={() => setShowFactDetails(!showFactDetails)}
+            className="flex items-center gap-1 text-[11px] font-semibold text-indigo-300 hover:text-white px-2 py-1 rounded-lg bg-indigo-900/60 border border-indigo-600/40 transition"
+          >
+            <span>{showFactDetails ? 'Ẩn chi tiết Fact-check' : 'Xem sự thật bóc tách'}</span>
+            {showFactDetails ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
 
-          {/* Section 3: Description */}
-          <ContentSection
-            label="3. Mô tả / Caption bắt trend"
-            sublabel="Bố cục thoáng, kích thích thảo luận & bình luận"
-            content={generatedPackage.description}
-            onCopyNotice={(t) => onShowToast(t, 'success')}
-          />
+          {/* Collapsible Facts Drawer */}
+          {showFactDetails && (
+            <div className="w-full mt-2 pt-2 border-t border-indigo-800/60 space-y-2 text-[11px] text-slate-300">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <strong className="text-white">Chữ trên màn hình (On-screen Text):</strong>
+                  <ul className="list-disc list-inside mt-0.5 space-y-0.5 text-slate-400">
+                    {seoPackage.videoFacts.on_screen_text.map((t, i) => (
+                      <li key={i}>{t}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <strong className="text-white">Thực thể & Sự kiện nhận diện:</strong>
+                  <ul className="list-disc list-inside mt-0.5 space-y-0.5 text-slate-400">
+                    {seoPackage.videoFacts.entities.map((e, i) => (
+                      <li key={i}>
+                        {e.name} ({e.type})
+                      </li>
+                    ))}
+                    {seoPackage.videoFacts.numbers_and_facts.map((n, i) => (
+                      <li key={`f_${i}`}>{n.fact}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
-          {/* Section 4: Hashtags */}
-          <ContentSection
-            label="4. Bộ Hashtag xu hướng (#Hashtags)"
-            sublabel="Kết hợp hashtag viral triệu view và hashtag ngách chuẩn xác"
-            content={generatedPackage.hashtags}
-            isHashtags
-            onCopyNotice={(t) => onShowToast(t, 'success')}
-          />
+      {/* 3. Output Section: Multi-Platform Tabs & Rich SEO Card */}
+      {seoPackage && currentPlatformData && (
+        <div className="glass-panel rounded-3xl p-4 sm:p-6 space-y-5 border border-slate-800 shadow-2xl">
+          {/* Header & Platform Tabs */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+            {/* Tabs */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {seoPackage.selectedPlatforms.map((plat) => {
+                const isActive = activePlatformTab === plat;
+                const rule = PLATFORM_RULES[plat];
+                return (
+                  <button
+                    key={plat}
+                    type="button"
+                    onClick={() => setActivePlatformTab(plat)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                      isActive
+                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 ring-1 ring-indigo-400'
+                        : 'bg-slate-900 text-slate-400 hover:bg-slate-800 hover:text-white border border-slate-800'
+                    }`}
+                  >
+                    <span>{plat === 'youtube_long' ? '📺' : plat === 'youtube_shorts' ? '⚡' : plat === 'tiktok' ? '🎵' : plat === 'facebook' ? '📘' : '📸'}</span>
+                    <span>{rule.name}</span>
+                  </button>
+                );
+              })}
+            </div>
 
-          {/* Section 5: CTA */}
-          <ContentSection
-            label="5. Kêu gọi hành động (CTA)"
-            sublabel="Thúc đẩy tương tác, share & follow tự nhiên"
-            content={generatedPackage.cta}
-            onCopyNotice={(t) => onShowToast(t, 'success')}
-          />
+            {/* Match score badge & Copy All */}
+            <div className="flex items-center gap-2">
+              <span className="flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-semibold bg-emerald-950/60 text-emerald-400 border border-emerald-600/40">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Khớp video: {currentPlatformData.match_score}%</span>
+              </span>
 
-          {/* Section 6: Trend Tip (If generated) */}
-          {generatedPackage.trendTip && (
-            <div className="p-3.5 rounded-xl bg-gradient-to-r from-amber-950/30 via-slate-900 to-indigo-950/30 border border-amber-500/30 flex items-start gap-3 text-xs">
-              <Flame className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-              <div className="space-y-1">
-                <div className="font-semibold text-amber-300">Mẹo xu hướng & Âm thanh thịnh hành:</div>
-                <p className="text-slate-300 leading-relaxed">{generatedPackage.trendTip}</p>
+              <button
+                type="button"
+                onClick={handleCopyAllForPlatform}
+                className="flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition shadow-sm"
+              >
+                <Copy className="w-3 h-3" />
+                <span>Copy tất cả cho nền tảng này</span>
+              </button>
+            </div>
+          </div>
+
+          {/* A. 3 Titles (Select 1, Count chars, Copy) */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                <span>Tiêu đề chuẩn SEO (Chọn 1 trong 3 phương án):</span>
+              </label>
+              <span className="text-[11px] text-slate-400">
+                Khuyên dùng: {PLATFORM_RULES[activePlatformTab].bestTitleLengthRange[0]}-
+                {PLATFORM_RULES[activePlatformTab].bestTitleLengthRange[1]} ký tự
+              </span>
+            </div>
+
+            <div className="space-y-2">
+              {currentPlatformData.titles.map((titleText, idx) => {
+                const isSelected = currentPlatformData.selectedTitleIndex === idx;
+                const charCount = titleText.length;
+                const maxChar = PLATFORM_RULES[activePlatformTab].maxTitleLength;
+                const isOptimal =
+                  charCount >= PLATFORM_RULES[activePlatformTab].bestTitleLengthRange[0] &&
+                  charCount <= PLATFORM_RULES[activePlatformTab].bestTitleLengthRange[1];
+
+                return (
+                  <div
+                    key={idx}
+                    onClick={() => handleSelectTitle(idx)}
+                    className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                      isSelected
+                        ? 'bg-indigo-950/40 border-indigo-500 ring-1 ring-indigo-400 text-white shadow-sm'
+                        : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2.5 min-w-0">
+                      <div className="pt-0.5">
+                        <input
+                          type="radio"
+                          name="title_selection"
+                          checked={isSelected}
+                          onChange={() => handleSelectTitle(idx)}
+                          className="w-3.5 h-3.5 accent-indigo-500 cursor-pointer"
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold leading-snug">{titleText}</p>
+                        <p className="text-[10px] text-slate-400 flex items-center gap-1.5 mt-0.5">
+                          <span>Phương án #{idx + 1}</span>
+                          <span>•</span>
+                          <span className={isOptimal ? 'text-emerald-400 font-semibold' : 'text-slate-400'}>
+                            {charCount}/{maxChar} ký tự {isOptimal ? '(Tối ưu SEO)' : ''}
+                          </span>
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCopy(titleText, `Tiêu đề #${idx + 1}`);
+                      }}
+                      className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800 shrink-0"
+                      title="Copy tiêu đề này"
+                    >
+                      {copiedItem === `Tiêu đề #${idx + 1}` ? (
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* B. Editable Description & Copy */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                <FileText className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Nội dung mô tả / Caption:</span>
+              </label>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-mono text-slate-400">
+                  {currentPlatformData.description.length} ký tự
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleCopy(currentPlatformData.description, 'Mô tả')}
+                  className="flex items-center gap-1 text-[11px] font-semibold text-indigo-300 hover:text-white px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-800"
+                >
+                  <Copy className="w-3 h-3" />
+                  <span>Copy</span>
+                </button>
+              </div>
+            </div>
+
+            <textarea
+              rows={5}
+              value={currentPlatformData.description}
+              onChange={(e) => {
+                const val = e.target.value;
+                updateCurrentPlatform((prev) => ({ ...prev, description: val }));
+              }}
+              className="w-full p-3 rounded-2xl bg-slate-950/80 border border-slate-800 text-white text-xs leading-relaxed focus:border-indigo-500 focus:outline-none scrollbar-thin resize-y"
+            />
+          </div>
+
+          {/* C. Interactive Hashtags (Chips: click to remove, add custom) */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                <Hash className="w-3.5 h-3.5 text-pink-400" />
+                <span>Hashtags ({currentPlatformData.hashtags.length}):</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => handleCopy(currentPlatformData.hashtags.join(' '), 'Hashtags')}
+                className="flex items-center gap-1 text-[11px] font-semibold text-pink-300 hover:text-white px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-800"
+              >
+                <Copy className="w-3 h-3" />
+                <span>Copy tất cả hashtag</span>
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5 p-2 rounded-2xl bg-slate-950/60 border border-slate-800">
+              {currentPlatformData.hashtags.map((tagText) => (
+                <span
+                  key={tagText}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-pink-950/40 border border-pink-700/40 text-pink-300 text-xs font-semibold"
+                >
+                  <span>{tagText}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveHashtag(tagText)}
+                    className="hover:text-white text-pink-400/80"
+                    title="Xóa hashtag này"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+
+              {/* Add custom hashtag inline input */}
+              <div className="flex items-center gap-1">
+                <input
+                  type="text"
+                  placeholder="#them_hashtag..."
+                  value={newHashtagInput}
+                  onChange={(e) => setNewHashtagInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddHashtag();
+                    }
+                  }}
+                  className="px-2 py-1 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs w-28 focus:outline-none focus:border-pink-500"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddHashtag}
+                  className="p-1 rounded-lg bg-pink-900/60 text-pink-300 hover:text-white"
+                  title="Thêm hashtag"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* D. YouTube Tags (Only for YouTube Long or Shorts) */}
+          {(activePlatformTab === 'youtube_long' || activePlatformTab === 'youtube_shorts') && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                  <Tag className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Thẻ Tags YouTube ({currentPlatformData.tags.length} thẻ):</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-mono text-slate-400">
+                    Tổng: {currentPlatformData.tags.join(', ').length}/500 ký tự
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(currentPlatformData.tags.join(', '), 'Tags YouTube')}
+                    className="flex items-center gap-1 text-[11px] font-semibold text-amber-300 hover:text-white px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-800"
+                  >
+                    <Copy className="w-3 h-3" />
+                    <span>Copy dán vào YouTube Studio</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5 p-2 rounded-2xl bg-slate-950/60 border border-slate-800">
+                {currentPlatformData.tags.map((t, idx) => (
+                  <span
+                    key={idx}
+                    className="px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-700/80 text-slate-300 text-[11px] font-mono"
+                  >
+                    {t}
+                  </span>
+                ))}
               </div>
             </div>
           )}
 
-          {/* Visual Insights Note */}
-          {generatedPackage.sourceSummary && (
-            <div className="p-3 bg-slate-900/50 border border-slate-800/80 rounded-xl text-xs text-slate-400 flex items-start gap-2">
-              <Eye className="w-3.5 h-3.5 text-indigo-400 shrink-0 mt-0.5" />
-              <span>
-                <strong>Nhận diện từ video:</strong> {generatedPackage.sourceSummary}
+          {/* E. Used Keywords & Real Sources */}
+          <div className="p-3 rounded-2xl bg-slate-950/70 border border-slate-800/80 space-y-2 text-xs">
+            <span className="font-semibold text-slate-300 flex items-center gap-1.5">
+              <Search className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Từ khóa thực tế đã dùng & Nguồn dữ liệu:</span>
+            </span>
+
+            <div className="flex flex-wrap gap-1.5">
+              <span className="px-2.5 py-1 rounded-xl bg-indigo-950/60 border border-indigo-700/50 text-indigo-300 font-semibold">
+                ⭐ Từ khóa chính: &quot;{currentPlatformData.primary_keyword}&quot;
               </span>
+
+              {Object.entries(currentPlatformData.keyword_sources).map(([kw, src], idx) => (
+                <span
+                  key={idx}
+                  className="px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 text-[11px] flex items-center gap-1"
+                >
+                  <strong className="text-white">{kw}</strong>
+                  <span className="text-[9px] text-indigo-400 bg-indigo-950 px-1 rounded font-mono">
+                    [{src}]
+                  </span>
+                </span>
+              ))}
             </div>
-          )}
-        </div>
-      ) : (
-        <div className="border border-dashed border-slate-800 rounded-2xl p-8 text-center bg-slate-900/30 text-slate-500 space-y-2">
-          <Sparkles className="w-8 h-8 mx-auto text-indigo-400" />
-          <p className="text-xs font-semibold text-slate-300">
-            Bấm &ldquo;⚡ Xem video & Rút tiêu đề, mô tả, hashtag xu hướng&rdquo;
-          </p>
-          <p className="text-[11px] text-slate-500 max-w-md mx-auto">
-            Hệ thống sẽ lấy các khung hình đại diện từ video, nhận diện các chi tiết thị giác và kết hợp với các xu hướng hot nhất hiện nay để trích xuất bộ tiêu đề, caption và hashtag chuẩn viral.
-          </p>
+          </div>
         </div>
       )}
     </div>

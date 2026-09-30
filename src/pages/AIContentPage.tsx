@@ -29,10 +29,10 @@ export const AIContentPage: React.FC<AIContentPageProps> = ({
         <div className="space-y-4 max-w-2xl mx-auto">
           <div className="text-center space-y-1.5 px-2">
             <h2 className="text-base sm:text-lg font-bold text-white bg-clip-text text-transparent bg-gradient-to-r from-white via-indigo-200 to-indigo-400">
-              Tạo Kịch Bản & Nội Dung Mạng Xã Hội Bằng AI
+              Phân Tích Video & Tạo Nội Dung SEO Chuẩn Xác Bằng AI
             </h2>
             <p className="text-xs text-slate-400 max-w-lg mx-auto">
-              AI đọc âm thanh & phân tích khung hình thực tế để đề xuất Tiêu đề, Hook, Mô tả, Hashtag tối ưu theo TikTok, Shorts, Reels.
+              Trích xuất sự thật 100% qua Gemini Files API (cả hình ảnh & âm thanh), nghiên cứu từ khóa Google/YouTube thật và tạo Tiêu đề + Mô tả + Hashtag + Tags chuẩn SEO cho từng nền tảng.
             </p>
           </div>
 
