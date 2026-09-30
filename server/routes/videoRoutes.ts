@@ -125,3 +125,140 @@ videoRouter.post(
     }
   }
 );
+
+/**
+ * Endpoint for high-speed server FFmpeg Video Merging with Transitions (xfade)
+ */
+videoRouter.post(
+  '/merge',
+  diskUpload.array('videos', 25),
+  async (req: Request, res: Response) => {
+    const uploadedFiles = req.files as Express.Multer.File[];
+    if (!uploadedFiles || uploadedFiles.length < 2) {
+      return res.status(400).json({
+        success: false,
+        error: 'NEED_AT_LEAST_2_VIDEOS',
+        message: 'Cần tối thiểu 2 video để thực hiện ghép.',
+      });
+    }
+
+    const inputPaths = uploadedFiles.map((f) => f.path);
+    const outputPath = path.join(tempDir, `merged_${Date.now()}_${Math.random().toString(36).substring(7)}.mp4`);
+
+    try {
+      const optionsRaw = req.body.options;
+      const options = optionsRaw ? JSON.parse(optionsRaw) : {};
+
+      const result = await serverFFmpegService.mergeVideosWithTransitions({
+        inputPaths,
+        outputPath,
+        transitions: options.transitions,
+        autoTransitions: Boolean(options.autoTransitions),
+        quality: options.quality || 'original',
+      });
+
+      res.setHeader('Content-Type', 'video/mp4');
+      res.setHeader('X-Duration', result.duration.toString());
+      res.setHeader('X-Size-Bytes', result.sizeBytes.toString());
+
+      const readStream = fs.createReadStream(result.outputPath);
+      readStream.pipe(res);
+
+      readStream.on('close', async () => {
+        for (const ip of inputPaths) {
+          await fsp.unlink(ip).catch(() => {});
+        }
+        await fsp.unlink(outputPath).catch(() => {});
+      });
+
+      readStream.on('error', async (streamErr) => {
+        console.error('Error streaming merged video:', streamErr);
+        for (const ip of inputPaths) {
+          await fsp.unlink(ip).catch(() => {});
+        }
+        await fsp.unlink(outputPath).catch(() => {});
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Lỗi xử lý ghép video.';
+      console.error('Video merge failed:', err);
+
+      for (const ip of inputPaths) {
+        await fsp.unlink(ip).catch(() => {});
+      }
+      await fsp.unlink(outputPath).catch(() => {});
+
+      if (!res.headersSent) {
+        return res.status(500).json({
+          success: false,
+          error: 'MERGE_FAILED',
+          message: msg,
+        });
+      }
+    }
+  }
+);
+
+/**
+ * Endpoint for high-speed server FFmpeg Text Overlay rendering
+ */
+videoRouter.post(
+  '/render-text',
+  diskUpload.single('video'),
+  async (req: Request, res: Response) => {
+    const uploadedFile = req.file;
+    if (!uploadedFile) {
+      return res.status(400).json({
+        success: false,
+        error: 'NO_FILE',
+        message: 'Vui lòng cung cấp tập tin video.',
+      });
+    }
+
+    const inputPath = uploadedFile.path;
+    const outputPath = path.join(tempDir, `text_rendered_${Date.now()}_${Math.random().toString(36).substring(7)}.mp4`);
+
+    try {
+      const optionsRaw = req.body.options;
+      const options = optionsRaw ? JSON.parse(optionsRaw) : {};
+
+      const result = await serverFFmpegService.renderTextOverlay({
+        inputPath,
+        outputPath,
+        textItems: options.textItems || [],
+        quality: options.quality || 'original',
+      });
+
+      res.setHeader('Content-Type', 'video/mp4');
+      res.setHeader('X-Duration', result.duration.toString());
+      res.setHeader('X-Size-Bytes', result.sizeBytes.toString());
+
+      const readStream = fs.createReadStream(result.outputPath);
+      readStream.pipe(res);
+
+      readStream.on('close', async () => {
+        await fsp.unlink(inputPath).catch(() => {});
+        await fsp.unlink(outputPath).catch(() => {});
+      });
+
+      readStream.on('error', async (streamErr) => {
+        console.error('Error streaming text-overlaid video:', streamErr);
+        await fsp.unlink(inputPath).catch(() => {});
+        await fsp.unlink(outputPath).catch(() => {});
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Lỗi xử lý thêm chữ vào video.';
+      console.error('Text overlay render failed:', err);
+
+      await fsp.unlink(inputPath).catch(() => {});
+      await fsp.unlink(outputPath).catch(() => {});
+
+      if (!res.headersSent) {
+        return res.status(500).json({
+          success: false,
+          error: 'RENDER_TEXT_FAILED',
+          message: msg,
+        });
+      }
+    }
+  }
+);

@@ -5,6 +5,7 @@ import {
   ObjectRemovalConfig,
   OutputQuality,
   ProcessingProgress,
+  TextOverlayItem,
   TrimConfig,
   VideoItem,
   VideoMetadata,
@@ -20,6 +21,13 @@ export interface TrimParams {
 
 export interface MergeParams {
   items: MergeItem[];
+  quality: OutputQuality;
+  autoTransitions?: boolean;
+}
+
+export interface TextOverlayParams {
+  video: VideoItem;
+  textItems: TextOverlayItem[];
   quality: OutputQuality;
 }
 
@@ -38,6 +46,11 @@ export interface IVideoProcessor {
   ): Promise<VideoOperationResult>;
   mergeVideos(
     params: MergeParams,
+    onProgress?: (progress: ProcessingProgress) => void,
+    signal?: AbortSignal
+  ): Promise<VideoOperationResult>;
+  renderTextOverlay(
+    params: TextOverlayParams,
     onProgress?: (progress: ProcessingProgress) => void,
     signal?: AbortSignal
   ): Promise<VideoOperationResult>;
@@ -682,6 +695,302 @@ class BrowserMediaProcessor implements IVideoProcessor {
   }
 
   /**
+   * REAL TEXT OVERLAY: Renders video with styled text layers onto video frames
+   */
+  async renderTextOverlay(
+    params: TextOverlayParams,
+    onProgress?: (progress: ProcessingProgress) => void,
+    signal?: AbortSignal
+  ): Promise<VideoOperationResult> {
+    const { video, textItems, quality } = params;
+    const { targetWidth, targetHeight } = this.calculateTargetDimensions(
+      video.metadata.width,
+      video.metadata.height,
+      quality
+    );
+
+    const processVideo = document.createElement('video');
+    processVideo.crossOrigin = 'anonymous';
+    processVideo.playsInline = true;
+    processVideo.preload = 'auto';
+    processVideo.src = video.url;
+
+    await new Promise<void>((resolve, reject) => {
+      processVideo.onloadeddata = () => resolve();
+      processVideo.onerror = () => reject(new Error('Không thể tải video để thêm chữ.'));
+    });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    const ctx = canvas.getContext('2d', { alpha: false })!;
+
+    const fps = video.metadata.fps || 30;
+    const canvasStream = canvas.captureStream(fps);
+
+    // Audio setup
+    let audioCtx: AudioContext | null = null;
+    let audioDestination: MediaStreamAudioDestinationNode | null = null;
+    let combinedStream: MediaStream = canvasStream;
+
+    try {
+      const AudioContextClass =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (AudioContextClass) {
+        audioCtx = new AudioContextClass();
+        if (audioCtx.state === 'suspended') {
+          await audioCtx.resume();
+        }
+        audioDestination = audioCtx.createMediaStreamDestination();
+        const sourceNode = audioCtx.createMediaElementSource(processVideo);
+        sourceNode.connect(audioDestination);
+        const audioTracks = audioDestination.stream.getAudioTracks();
+        if (audioTracks.length > 0) {
+          combinedStream = new MediaStream([
+            ...canvasStream.getVideoTracks(),
+            ...audioTracks,
+          ]);
+        }
+      }
+    } catch {
+      combinedStream = canvasStream;
+    }
+
+    const { mimeType } = this.getSupportedMimeType();
+    const bitRate = quality === '720p' ? 2500000 : quality === '1080p' ? 5000000 : 8000000;
+
+    const recorder = new MediaRecorder(combinedStream, {
+      mimeType: mimeType || undefined,
+      videoBitsPerSecond: bitRate,
+    });
+
+    const recordedChunks: Blob[] = [];
+    recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) {
+        recordedChunks.push(e.data);
+      }
+    };
+
+    const recordingDone = new Promise<Blob>((resolve) => {
+      recorder.onstop = () => {
+        const outBlob = new Blob(recordedChunks, {
+          type: recorder.mimeType || 'video/mp4',
+        });
+        resolve(outBlob);
+      };
+    });
+
+    recorder.start(100);
+    processVideo.currentTime = 0;
+
+    try {
+      await processVideo.play();
+    } catch {
+      processVideo.muted = true;
+      await processVideo.play();
+    }
+
+    const duration = processVideo.duration || video.metadata.duration || 10;
+    const startTimeStamp = performance.now();
+
+    await new Promise<void>((resolve, reject) => {
+      let isDone = false;
+
+      const renderFrame = () => {
+        if (signal?.aborted) {
+          isDone = true;
+          processVideo.pause();
+          try {
+            recorder.stop();
+          } catch {}
+          reject(new Error('Thao tác thêm chữ đã bị hủy.'));
+          return;
+        }
+
+        if (isDone) return;
+
+        // Draw current video frame
+        ctx.drawImage(processVideo, 0, 0, targetWidth, targetHeight);
+
+        const curT = processVideo.currentTime;
+
+        // Draw active text items
+        for (const item of textItems) {
+          const isVisible =
+            item.fullDuration || (curT >= item.startTime && curT <= item.endTime);
+          if (!isVisible || !item.text.trim()) continue;
+
+          ctx.save();
+
+          // Position
+          let posX = (item.x / 100) * targetWidth;
+          let posY = (item.y / 100) * targetHeight;
+
+          if (item.positionPreset === 'top') {
+            posX = targetWidth / 2;
+            posY = targetHeight * 0.1;
+          } else if (item.positionPreset === 'center') {
+            posX = targetWidth / 2;
+            posY = targetHeight / 2;
+          } else if (item.positionPreset === 'lower_third') {
+            posX = targetWidth / 2;
+            posY = targetHeight * 0.75;
+          } else if (item.positionPreset === 'bottom') {
+            posX = targetWidth / 2;
+            posY = targetHeight * 0.88;
+          }
+
+          // Font configuration
+          const fontSize = Math.round((item.fontSize || 32) * (targetHeight / 720));
+          const fontWeight = item.isBold ? 'bold' : 'normal';
+          const fontStyle = item.isItalic ? 'italic' : 'normal';
+          ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px "${item.fontFamily || 'Montserrat'}", sans-serif`;
+          ctx.textAlign = item.textAlign || 'center';
+          ctx.textBaseline = 'middle';
+
+          // Animation alpha/translation
+          const timeFromStart = Math.max(0, curT - item.startTime);
+          const timeToEnd = Math.max(0, item.endTime - curT);
+          const animDur = item.animationDuration || 0.4;
+          let alpha = (item.opacity ?? 100) / 100;
+
+          if (item.animation === 'fade') {
+            if (timeFromStart < animDur) {
+              alpha *= timeFromStart / animDur;
+            } else if (!item.fullDuration && timeToEnd < animDur) {
+              alpha *= timeToEnd / animDur;
+            }
+          } else if (item.animation === 'slide_up') {
+            const p = Math.min(1, timeFromStart / animDur);
+            posY += (1 - p) * 30;
+          } else if (item.animation === 'slide_left') {
+            const p = Math.min(1, timeFromStart / animDur);
+            posX += (1 - p) * 40;
+          }
+
+          ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+
+          let displayText = item.isUppercase ? item.text.toUpperCase() : item.text;
+          if (item.animation === 'typewriter' && !item.fullDuration) {
+            const frac = Math.min(1, timeFromStart / Math.min(2.0, (item.endTime - item.startTime) * 0.7));
+            displayText = displayText.slice(0, Math.ceil(displayText.length * frac));
+          }
+
+          // Draw Box
+          if (item.boxEnabled) {
+            const textMetrics = ctx.measureText(displayText);
+            const pad = item.boxPadding || 8;
+            const boxW = textMetrics.width + pad * 3;
+            const boxH = fontSize * 1.4 + pad * 1.5;
+            let boxX = posX - boxW / 2;
+            if (item.textAlign === 'left') boxX = posX - pad;
+            if (item.textAlign === 'right') boxX = posX - boxW + pad;
+            const boxY = posY - boxH / 2;
+
+            ctx.fillStyle = item.boxColor || '#000000';
+            ctx.save();
+            ctx.globalAlpha = ((item.boxOpacity ?? 80) / 100) * alpha;
+            ctx.fillRect(boxX, boxY, boxW, boxH);
+            ctx.restore();
+          }
+
+          // Draw Shadow
+          if (item.shadowEnabled) {
+            ctx.shadowColor = item.shadowColor || '#000000';
+            ctx.shadowBlur = item.shadowBlur || 4;
+            ctx.shadowOffsetX = 2;
+            ctx.shadowOffsetY = 2;
+          }
+
+          // Draw Stroke
+          if (item.strokeEnabled) {
+            ctx.strokeStyle = item.strokeColor || '#000000';
+            ctx.lineWidth = item.strokeWidth || 2;
+            ctx.strokeText(displayText, posX, posY);
+          }
+
+          // Draw Text
+          ctx.fillStyle = item.textColor || '#ffffff';
+          ctx.fillText(displayText, posX, posY);
+
+          ctx.restore();
+        }
+
+        const elapsedSec = (performance.now() - startTimeStamp) / 1000;
+        const progressPct = Math.min(95, Math.max(5, Math.round((curT / duration) * 90)));
+
+        onProgress?.({
+          stage: 'processing',
+          percent: progressPct,
+          message: `Đang render text vào video (${Math.round(curT)}s / ${Math.round(duration)}s)...`,
+          elapsedSeconds: Number(elapsedSec.toFixed(1)),
+        });
+
+        if (processVideo.ended || curT >= duration - 0.1) {
+          isDone = true;
+          processVideo.pause();
+          resolve();
+          return;
+        }
+
+        if ('requestVideoFrameCallback' in processVideo) {
+          (processVideo as unknown as { requestVideoFrameCallback: (cb: () => void) => void }).requestVideoFrameCallback(renderFrame);
+        } else {
+          requestAnimationFrame(renderFrame);
+        }
+      };
+
+      if ('requestVideoFrameCallback' in processVideo) {
+        (processVideo as unknown as { requestVideoFrameCallback: (cb: () => void) => void }).requestVideoFrameCallback(renderFrame);
+      } else {
+        requestAnimationFrame(renderFrame);
+      }
+
+      processVideo.onended = () => {
+        if (!isDone) {
+          isDone = true;
+          resolve();
+        }
+      };
+    });
+
+    onProgress?.({
+      stage: 'encoding',
+      percent: 98,
+      message: 'Đang đóng gói video hoàn chỉnh...',
+    });
+
+    try {
+      recorder.stop();
+    } catch {}
+
+    const outputBlob = await recordingDone;
+    combinedStream.getTracks().forEach((t) => t.stop());
+    canvasStream.getTracks().forEach((t) => t.stop());
+    if (audioCtx) {
+      audioCtx.close().catch(() => {});
+    }
+
+    const realMeta = await this.probeVideo(outputBlob);
+    const outputUrl = URL.createObjectURL(outputBlob);
+    this.activeUrls.add(outputUrl);
+
+    return {
+      success: true,
+      videoUrl: outputUrl,
+      videoName: `text_${video.name || 'video'}.mp4`,
+      downloadName: `video_with_text.mp4`,
+      duration: realMeta.duration,
+      sizeBytes: outputBlob.size,
+      quality,
+      operation: 'text',
+      metadata: realMeta,
+      blob: outputBlob,
+    };
+  }
+
+  /**
    * REAL OBJECT/LOGO REMOVAL: Renders video with specified region blurred/pixelated
    */
   async removeObject(
@@ -949,6 +1258,89 @@ class HybridVideoProcessor implements IVideoProcessor {
     onProgress?: (progress: ProcessingProgress) => void,
     signal?: AbortSignal
   ): Promise<VideoOperationResult> {
+    // 1. Try Native PC Server FFmpeg (Fastest, xfade + acrossfade, auto smooth transitions)
+    try {
+      const isNative = await fetch('/api/video/health')
+        .then((r) => r.json())
+        .then((d) => Boolean(d.nativeFFmpegAvailable))
+        .catch(() => false);
+
+      if (isNative) {
+        onProgress?.({
+          stage: 'analyzing',
+          percent: 10,
+          message: 'Tải video lên Native FFmpeg Server để ghép chuyển cảnh mượt mà...',
+        });
+
+        const formData = new FormData();
+        for (let i = 0; i < params.items.length; i++) {
+          const it = params.items[i];
+          let blob: Blob;
+          if (it.video.file) {
+            blob = it.video.file;
+          } else if (it.video.blob) {
+            blob = it.video.blob;
+          } else {
+            blob = await fetch(it.video.url).then((r) => r.blob());
+          }
+          formData.append('videos', blob, it.video.name || `clip_${i}.mp4`);
+        }
+
+        const options = {
+          autoTransitions: Boolean(params.autoTransitions),
+          transitions: params.items.map((it) => it.transition || { type: 'fade', duration: 0.75 }),
+          quality: params.quality,
+        };
+        formData.append('options', JSON.stringify(options));
+
+        onProgress?.({
+          stage: 'encoding',
+          percent: 45,
+          message: 'Native FFmpeg đang render hiệu ứng chuyển cảnh siêu tốc...',
+        });
+
+        const res = await fetch('/api/video/merge', {
+          method: 'POST',
+          body: formData,
+          signal,
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.message || 'Lỗi ghép video trên server.');
+        }
+
+        onProgress?.({
+          stage: 'finalizing',
+          percent: 92,
+          message: 'Đang nhận luồng video hoàn tất...',
+        });
+
+        const outBlob = await res.blob();
+        const outUrl = URL.createObjectURL(outBlob);
+        const metadata = await this.browserProcessor.probeVideo(outBlob);
+
+        return {
+          success: true,
+          videoUrl: outUrl,
+          videoName: `merged_${params.items.length}_clips.mp4`,
+          downloadName: `video_merged_xfade.mp4`,
+          duration: metadata.duration,
+          sizeBytes: outBlob.size,
+          quality: params.quality,
+          operation: 'merge',
+          metadata,
+          blob: outBlob,
+          engineUsed: 'native_ffmpeg',
+          reencodeStatus: 'reencoded',
+        };
+      }
+    } catch (nativeErr: unknown) {
+      if (signal?.aborted) throw nativeErr;
+      console.warn('Native FFmpeg merge failed, falling back to local client processor:', nativeErr);
+    }
+
+    // 2. Client fallback
     try {
       return await ffmpegProcessor.mergeVideos(
         params,
@@ -971,6 +1363,85 @@ class HybridVideoProcessor implements IVideoProcessor {
         engineUsed: 'browser',
       };
     }
+  }
+
+  async renderTextOverlay(
+    params: TextOverlayParams,
+    onProgress?: (progress: ProcessingProgress) => void,
+    signal?: AbortSignal
+  ): Promise<VideoOperationResult> {
+    const { video, textItems, quality } = params;
+
+    // 1. Try Native PC Server FFmpeg (Supports Vietnamese drawtext, hardware acceleration, lossless audio)
+    try {
+      const isNative = await fetch('/api/video/health')
+        .then((r) => r.json())
+        .then((d) => Boolean(d.nativeFFmpegAvailable))
+        .catch(() => false);
+
+      if (isNative) {
+        onProgress?.({
+          stage: 'analyzing',
+          percent: 15,
+          message: 'Chuẩn bị dữ liệu text và font chữ cho Native FFmpeg...',
+        });
+
+        let fileBlob: Blob | File;
+        if (video.file) {
+          fileBlob = video.file;
+        } else if (video.blob) {
+          fileBlob = video.blob;
+        } else {
+          fileBlob = await fetch(video.url).then((r) => r.blob());
+        }
+
+        const formData = new FormData();
+        formData.append('video', fileBlob, video.name || 'input.mp4');
+        formData.append('options', JSON.stringify({ textItems, quality }));
+
+        onProgress?.({
+          stage: 'encoding',
+          percent: 50,
+          message: 'Native FFmpeg đang render lớp chữ động và tối ưu âm thanh...',
+        });
+
+        const res = await fetch('/api/video/render-text', {
+          method: 'POST',
+          body: formData,
+          signal,
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.message || 'Lỗi render chữ vào video.');
+        }
+
+        const outBlob = await res.blob();
+        const outUrl = URL.createObjectURL(outBlob);
+        const metadata = await this.browserProcessor.probeVideo(outBlob);
+
+        return {
+          success: true,
+          videoUrl: outUrl,
+          videoName: `text_${video.name || 'video'}.mp4`,
+          downloadName: `video_with_text.mp4`,
+          duration: metadata.duration,
+          sizeBytes: outBlob.size,
+          quality,
+          operation: 'text',
+          metadata,
+          blob: outBlob,
+          engineUsed: 'native_ffmpeg',
+          reencodeStatus: 'reencoded',
+        };
+      }
+    } catch (err: unknown) {
+      if (signal?.aborted) throw err;
+      console.warn('Native FFmpeg renderText failed, falling back to BrowserMediaProcessor:', err);
+    }
+
+    // 2. Client Browser fallback
+    return await this.browserProcessor.renderTextOverlay(params, onProgress, signal);
   }
 
   async removeObject(

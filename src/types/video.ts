@@ -1,6 +1,101 @@
-export type ToolType = 'trim' | 'merge' | 'watermark' | 'unified';
+export type ToolType = 'trim' | 'merge' | 'watermark' | 'unified' | 'text';
 
 export type OutputQuality = 'original' | '1080p' | '720p';
+
+export type TransitionType =
+  | 'none'
+  | 'fade'
+  | 'dissolve'
+  | 'smoothleft'
+  | 'smoothright'
+  | 'smoothup'
+  | 'smoothdown'
+  | 'slideleft'
+  | 'slideright'
+  | 'slideup'
+  | 'slidedown'
+  | 'wipeleft'
+  | 'wiperight'
+  | 'circlecrop'
+  | 'circleopen'
+  | 'zoomin'
+  | 'pixelize'
+  | 'hblur'
+  | 'fadeblack'
+  | 'fadewhite';
+
+export interface VideoTransition {
+  type: TransitionType;
+  duration: number; // in seconds (e.g. 0.5 - 1.5s)
+}
+
+export interface MergeItem {
+  video: VideoItem;
+  order: number;
+  trimConfig?: TrimConfig;
+  transition?: VideoTransition;
+}
+
+export type TextFontFamily =
+  | 'Montserrat'
+  | 'Roboto'
+  | 'Inter'
+  | 'Be Vietnam Pro'
+  | 'Bebas Neue'
+  | 'Oswald'
+  | 'Playfair Display'
+  | 'Caveat'
+  | 'Arial';
+
+export type TextAnimationType =
+  | 'none'
+  | 'fade'
+  | 'slide_up'
+  | 'slide_left'
+  | 'zoom_in'
+  | 'bounce'
+  | 'typewriter';
+
+export type TextPositionPreset = 'top' | 'center' | 'bottom' | 'lower_third' | 'custom';
+
+export interface TextOverlayItem {
+  id: string;
+  text: string;
+  startTime: number;
+  endTime: number;
+  fullDuration: boolean;
+  // Typography
+  fontFamily: TextFontFamily;
+  fontSize: number; // 18 - 120
+  isBold: boolean;
+  isItalic: boolean;
+  isUppercase: boolean;
+  textAlign: 'left' | 'center' | 'right';
+  // Color & Opacity
+  textColor: string;
+  opacity: number; // 0 - 100
+  // Background Box / Highlight Tag
+  boxEnabled: boolean;
+  boxColor: string;
+  boxOpacity: number; // 0 - 100
+  boxPadding: number;
+  boxRadius: number;
+  // Outline / Stroke
+  strokeEnabled: boolean;
+  strokeColor: string;
+  strokeWidth: number;
+  // Shadow
+  shadowEnabled: boolean;
+  shadowColor: string;
+  shadowBlur: number;
+  // Positioning
+  positionPreset: TextPositionPreset;
+  x: number; // 0 - 100%
+  y: number; // 0 - 100%
+  // Animation / Motion
+  animation: TextAnimationType;
+  animationDuration: number;
+}
 
 export interface VideoMetadata {
   duration: number; // in seconds

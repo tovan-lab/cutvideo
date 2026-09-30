@@ -39,6 +39,56 @@ export interface UnifiedRenderOptions {
   quality?: '1080p' | '720p' | '480p' | 'original';
 }
 
+export interface ServerTransition {
+  type: string;
+  duration: number;
+}
+
+export interface ServerMergeOptions {
+  inputPaths: string[];
+  outputPath: string;
+  transitions?: ServerTransition[];
+  autoTransitions?: boolean;
+  quality?: '1080p' | '720p' | '480p' | 'original';
+}
+
+export interface ServerTextItem {
+  id: string;
+  text: string;
+  startTime: number;
+  endTime: number;
+  fullDuration?: boolean;
+  fontFamily?: string;
+  fontSize?: number;
+  isBold?: boolean;
+  isItalic?: boolean;
+  isUppercase?: boolean;
+  textAlign?: 'left' | 'center' | 'right';
+  textColor?: string;
+  opacity?: number;
+  boxEnabled?: boolean;
+  boxColor?: string;
+  boxOpacity?: number;
+  boxPadding?: number;
+  strokeEnabled?: boolean;
+  strokeColor?: string;
+  strokeWidth?: number;
+  shadowEnabled?: boolean;
+  shadowColor?: string;
+  positionPreset?: string;
+  x?: number;
+  y?: number;
+  animation?: 'none' | 'fade' | 'slide_up' | 'slide_left' | 'zoom_in' | 'bounce' | 'typewriter';
+  animationDuration?: number;
+}
+
+export interface ServerTextOverlayOptions {
+  inputPath: string;
+  outputPath: string;
+  textItems: ServerTextItem[];
+  quality?: '1080p' | '720p' | '480p' | 'original';
+}
+
 export class ServerFFmpegService {
   private ffmpegBin = process.env.FFMPEG_PATH || 'ffmpeg';
   private ffprobeBin = process.env.FFPROBE_PATH || 'ffprobe';
@@ -399,6 +449,347 @@ export class ServerFFmpegService {
       outputPath,
       reencodeStatus: 'reencoded',
       engineUsed: 'native_ffmpeg',
+      duration: outProbe.duration,
+      sizeBytes: outStats.size,
+      metadata: outProbe,
+    };
+  }
+
+  /**
+   * Merges multiple videos with cinematic transitions (xfade + acrossfade) or auto-smooth transitions.
+   * Auto-normalizes frame rates, dimensions, and audio channels.
+   */
+  async mergeVideosWithTransitions(
+    options: ServerMergeOptions
+  ): Promise<{
+    outputPath: string;
+    duration: number;
+    sizeBytes: number;
+    metadata: VideoProbeData;
+  }> {
+    const { inputPaths, outputPath, transitions = [], autoTransitions = false, quality = 'original' } = options;
+    if (inputPaths.length === 0) {
+      throw new Error('Không có video nào để ghép.');
+    }
+    if (inputPaths.length === 1) {
+      await execFileAsync(this.ffmpegBin, ['-i', inputPaths[0], '-c', 'copy', '-y', outputPath]);
+      const stats = await fs.stat(outputPath);
+      const probe = await this.probeVideo(outputPath);
+      return { outputPath, duration: probe.duration, sizeBytes: stats.size, metadata: probe };
+    }
+
+    // 1. Probe all input videos
+    const probes: VideoProbeData[] = [];
+    for (const p of inputPaths) {
+      probes.push(await this.probeVideo(p));
+    }
+
+    // Determine target dimensions
+    const isPortrait = probes[0].height > probes[0].width;
+    let targetWidth = probes[0].width;
+    let targetHeight = probes[0].height;
+
+    if (quality === '1080p') {
+      targetWidth = isPortrait ? 1080 : 1920;
+      targetHeight = isPortrait ? 1920 : 1080;
+    } else if (quality === '720p') {
+      targetWidth = isPortrait ? 720 : 1280;
+      targetHeight = isPortrait ? 1280 : 720;
+    } else if (quality === '480p') {
+      targetWidth = isPortrait ? 480 : 854;
+      targetHeight = isPortrait ? 854 : 480;
+    }
+    targetWidth = targetWidth % 2 === 0 ? targetWidth : targetWidth - 1;
+    targetHeight = targetHeight % 2 === 0 ? targetHeight : targetHeight - 1;
+
+    // Transition styles pool for auto smart transitions
+    const autoPool = ['smoothleft', 'dissolve', 'fade', 'smoothright', 'zoomin', 'fadeblack'];
+
+    // 2. Build input arguments and complex filtergraph
+    const args: string[] = [];
+    const filterComplex: string[] = [];
+
+    // Add inputs
+    for (let i = 0; i < inputPaths.length; i++) {
+      args.push('-i', inputPaths[i]);
+    }
+
+    // Video streams pre-processing: scale to fit box with black padding, set fps=30, sar=1
+    for (let i = 0; i < inputPaths.length; i++) {
+      filterComplex.push(
+        `[${i}:v]scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30[v${i}]`
+      );
+    }
+
+    // Audio streams pre-processing: ensure 48kHz stereo, generate silence if video has no audio
+    for (let i = 0; i < inputPaths.length; i++) {
+      if (probes[i].hasAudio) {
+        filterComplex.push(`[${i}:a]aformat=sample_rates=48000:channel_layouts=stereo,aresample=async=1[a${i}]`);
+      } else {
+        const d = probes[i].duration || 5;
+        filterComplex.push(`anullsrc=channel_layout=stereo:sample_rate=48000:d=${d}[a${i}]`);
+      }
+    }
+
+    // 3. Chain xfade and acrossfade
+    let currentOffset = 0;
+    let lastVideoLabel = 'v0';
+    let lastAudioLabel = 'a0';
+
+    for (let i = 1; i < inputPaths.length; i++) {
+      const prevDuration = probes[i - 1].duration || 5;
+      const nextDuration = probes[i].duration || 5;
+
+      let transType = 'fade';
+      let transDur = 0.75;
+
+      if (autoTransitions) {
+        transType = autoPool[(i - 1) % autoPool.length];
+        transDur = 0.75;
+      } else if (transitions[i - 1]) {
+        transType = transitions[i - 1].type || 'fade';
+        transDur = transitions[i - 1].duration || 0.75;
+      }
+
+      if (transType === 'none') {
+        transType = 'fade';
+        transDur = 0.01;
+      }
+
+      transDur = Math.max(0.01, Math.min(transDur, prevDuration / 2, nextDuration / 2, 2.0));
+
+      if (i === 1) {
+        currentOffset = prevDuration - transDur;
+      } else {
+        currentOffset = currentOffset + prevDuration - transDur;
+      }
+      currentOffset = Math.max(0.1, Number(currentOffset.toFixed(2)));
+
+      const outV = i === inputPaths.length - 1 ? 'outv' : `vx${i}`;
+      const outA = i === inputPaths.length - 1 ? 'outa' : `ax${i}`;
+
+      filterComplex.push(
+        `[${lastVideoLabel}][v${i}]xfade=transition=${transType}:duration=${transDur}:offset=${currentOffset}[${outV}]`
+      );
+      filterComplex.push(
+        `[${lastAudioLabel}][a${i}]acrossfade=d=${transDur}:c1=tri:c2=tri[${outA}]`
+      );
+
+      lastVideoLabel = outV;
+      lastAudioLabel = outA;
+    }
+
+    args.push(
+      '-filter_complex',
+      filterComplex.join(';'),
+      '-map',
+      '[outv]',
+      '-map',
+      '[outa]',
+      '-c:v',
+      'libx264',
+      '-preset',
+      'fast',
+      '-crf',
+      '19',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      '-b:a',
+      '192k',
+      '-movflags',
+      '+faststart',
+      '-y',
+      outputPath
+    );
+
+    await execFileAsync(this.ffmpegBin, args);
+    const outStats = await fs.stat(outputPath);
+    const outProbe = await this.probeVideo(outputPath);
+
+    return {
+      outputPath,
+      duration: outProbe.duration,
+      sizeBytes: outStats.size,
+      metadata: outProbe,
+    };
+  }
+
+  /**
+   * Renders multiple professional text overlays with custom font, colors, opacity, boxes, strokes, shadows, and animations.
+   */
+  async renderTextOverlay(
+    options: ServerTextOverlayOptions
+  ): Promise<{
+    outputPath: string;
+    duration: number;
+    sizeBytes: number;
+    metadata: VideoProbeData;
+  }> {
+    const { inputPath, outputPath, textItems, quality = 'original' } = options;
+    const probe = await this.probeVideo(inputPath);
+    const width = probe.width;
+    const height = probe.height;
+
+    if (!textItems || textItems.length === 0) {
+      await execFileAsync(this.ffmpegBin, ['-i', inputPath, '-c', 'copy', '-y', outputPath]);
+      const stats = await fs.stat(outputPath);
+      return { outputPath, duration: probe.duration, sizeBytes: stats.size, metadata: probe };
+    }
+
+    const tempFilesToClean: string[] = [];
+    const filters: string[] = [];
+
+    if (quality === '720p') {
+      filters.push('scale=-2:720');
+    } else if (quality === '1080p') {
+      filters.push('scale=-2:1080');
+    } else if (quality === '480p') {
+      filters.push('scale=-2:480');
+    }
+
+    const fontLookup: Record<string, string> = {
+      Arial: 'C\\:/Windows/Fonts/arial.ttf',
+      Montserrat: 'C\\:/Windows/Fonts/arialbd.ttf',
+      'Bebas Neue': 'C\\:/Windows/Fonts/impact.ttf',
+      'Playfair Display': 'C\\:/Windows/Fonts/timesbd.ttf',
+      'Be Vietnam Pro': 'C\\:/Windows/Fonts/segoeui.ttf',
+      Roboto: 'C\\:/Windows/Fonts/segoeui.ttf',
+      Inter: 'C\\:/Windows/Fonts/arial.ttf',
+      Oswald: 'C\\:/Windows/Fonts/impact.ttf',
+      Caveat: 'C\\:/Windows/Fonts/segoepr.ttf',
+    };
+
+    for (let i = 0; i < textItems.length; i++) {
+      const item = textItems[i];
+      if (!item.text || !item.text.trim()) continue;
+
+      const tempTextPath = path.join(path.dirname(outputPath), `text_${Date.now()}_${i}.txt`);
+      await fs.writeFile(tempTextPath, item.text, { encoding: 'utf8' });
+      tempFilesToClean.push(tempTextPath);
+
+      const escapedTextFile = tempTextPath.replace(/\\/g, '/').replace(/:/g, '\\:');
+      const fontFile = fontLookup[item.fontFamily || ''] || 'C\\:/Windows/Fonts/arialbd.ttf';
+      const baseFontSize = item.fontSize || 36;
+      const opacity = (item.opacity ?? 100) / 100;
+      const hexColor = (item.textColor || '#ffffff').replace('#', '0x');
+
+      let xExpr = '(w-text_w)/2';
+      let yExpr = 'h-text_h-50';
+
+      if (item.positionPreset === 'top') {
+        yExpr = 'h*0.08';
+      } else if (item.positionPreset === 'center') {
+        yExpr = '(h-text_h)/2';
+      } else if (item.positionPreset === 'lower_third') {
+        yExpr = 'h*0.75';
+      } else if (item.positionPreset === 'bottom') {
+        yExpr = 'h-text_h-50';
+      } else if (item.positionPreset === 'custom' || (item.x !== undefined && item.y !== undefined)) {
+        const px = Math.round(((item.x ?? 50) / 100) * width);
+        const py = Math.round(((item.y ?? 80) / 100) * height);
+        xExpr = `${px}-(text_w/2)`;
+        yExpr = `${py}-(text_h/2)`;
+      }
+
+      const startT = Math.max(0, item.startTime || 0);
+      const endT = item.fullDuration ? probe.duration : Math.min(probe.duration, item.endTime || probe.duration);
+      const animDur = item.animationDuration || 0.4;
+
+      let alphaExpr = `${opacity}`;
+      let dynamicX = xExpr;
+      let dynamicY = yExpr;
+      let dynamicSize = `${baseFontSize}`;
+
+      if (item.animation === 'fade') {
+        alphaExpr = `if(lt(t\\,${startT}+${animDur})\\, (t-${startT})/${animDur}\\, if(gt(t\\,${endT}-${animDur})\\, (${endT}-t)/${animDur}\\, 1)) * ${opacity}`;
+      } else if (item.animation === 'slide_up') {
+        dynamicY = `if(lt(t\\,${startT}+${animDur})\\, (${yExpr}) + (1-(t-${startT})/${animDur})*80\\, ${yExpr})`;
+      } else if (item.animation === 'slide_left') {
+        dynamicX = `if(lt(t\\,${startT}+${animDur})\\, (${xExpr}) + (1-(t-${startT})/${animDur})*120\\, ${xExpr})`;
+      } else if (item.animation === 'zoom_in') {
+        dynamicSize = `if(lt(t\\,${startT}+${animDur})\\, ${baseFontSize}*(0.6 + 0.4*(t-${startT})/${animDur})\\, ${baseFontSize})`;
+      }
+
+      const drawParts: string[] = [
+        `fontfile='${fontFile}'`,
+        `textfile='${escapedTextFile}'`,
+        `fontsize=${dynamicSize}`,
+        `fontcolor=${hexColor}`,
+        `alpha='${alphaExpr}'`,
+        `x=${dynamicX}`,
+        `y=${dynamicY}`,
+      ];
+
+      if (item.boxEnabled) {
+        const boxColor = (item.boxColor || '#000000').replace('#', '0x');
+        const boxAlpha = (item.boxOpacity ?? 80) / 100;
+        const boxPad = item.boxPadding || 10;
+        drawParts.push(`box=1`, `boxcolor=${boxColor}@${boxAlpha}`, `boxborderw=${boxPad}`);
+      }
+
+      if (item.strokeEnabled) {
+        const strokeColor = (item.strokeColor || '#000000').replace('#', '0x');
+        const strokeW = item.strokeWidth || 3;
+        drawParts.push(`borderw=${strokeW}`, `bordercolor=${strokeColor}`);
+      }
+
+      if (item.shadowEnabled) {
+        const shadowColor = (item.shadowColor || '#000000').replace('#', '0x');
+        drawParts.push(`shadowx=2`, `shadowy=2`, `shadowcolor=${shadowColor}@0.6`);
+      }
+
+      if (!item.fullDuration) {
+        drawParts.push(`enable='between(t\\,${startT}\\,${endT})'`);
+      }
+
+      filters.push(`drawtext=${drawParts.join(':')}`);
+    }
+
+    const args: string[] = ['-i', inputPath];
+    if (filters.length > 0) {
+      args.push('-vf', filters.join(','));
+    }
+
+    args.push(
+      '-c:v',
+      'libx264',
+      '-preset',
+      'fast',
+      '-crf',
+      '18',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'copy',
+      '-movflags',
+      '+faststart',
+      '-y',
+      outputPath
+    );
+
+    try {
+      await execFileAsync(this.ffmpegBin, args);
+    } catch (encErr) {
+      console.warn('Text overlay with audio copy failed, retrying with AAC...', encErr);
+      const aacArgs = args.map((a) => (a === 'copy' ? 'aac' : a));
+      const idx = aacArgs.indexOf('aac');
+      if (idx !== -1) {
+        aacArgs.splice(idx + 1, 0, '-b:a', '192k');
+      }
+      await execFileAsync(this.ffmpegBin, aacArgs);
+    } finally {
+      for (const tf of tempFilesToClean) {
+        await fs.unlink(tf).catch(() => {});
+      }
+    }
+
+    const outStats = await fs.stat(outputPath);
+    const outProbe = await this.probeVideo(outputPath).catch(() => probe);
+
+    return {
+      outputPath,
       duration: outProbe.duration,
       sizeBytes: outStats.size,
       metadata: outProbe,

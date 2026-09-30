@@ -9,6 +9,7 @@ import {
   ArrowRight,
   Sliders,
   CheckCircle,
+  Type,
 } from 'lucide-react';
 import {
   MergeItem,
@@ -16,6 +17,7 @@ import {
   ObjectRemovalConfig,
   OutputQuality,
   ProcessingProgress,
+  TextOverlayItem,
   ToolType,
   TrimConfig,
   UnifiedEditPlan,
@@ -30,6 +32,8 @@ import {
   ObjectRemovalSelector,
   ObjectRemovalOverlay,
 } from '../components/video/ObjectRemovalSelector';
+import { TextOverlayEditor } from '../components/video/TextOverlayEditor';
+import { TextOverlayCanvas } from '../components/video/TextOverlayCanvas';
 import { UnifiedCleanControls } from '../components/video/UnifiedCleanControls';
 import { ProcessingModal } from '../components/video/ProcessingModal';
 import { VideoResult } from '../components/video/VideoResult';
@@ -69,7 +73,8 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
     endTime: currentVideo?.metadata.duration || 8,
   });
 
-  // Merge list
+  // Merge list & auto-transitions
+  const [autoTransitions, setAutoTransitions] = useState(true);
   const [mergeItems, setMergeItems] = useState<MergeItem[]>(() =>
     currentVideo
       ? [
@@ -81,9 +86,45 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
       : []
   );
 
+  // Text overlay state
+  const [textItems, setTextItems] = useState<TextOverlayItem[]>([
+    {
+      id: 'text_init_1',
+      text: 'Tiêu đề video cuốn hút ✨',
+      startTime: 0,
+      endTime: currentVideo?.metadata.duration || 6,
+      fullDuration: true,
+      fontFamily: 'Montserrat',
+      fontSize: 32,
+      isBold: true,
+      isItalic: false,
+      isUppercase: false,
+      textAlign: 'center',
+      textColor: '#ffffff',
+      opacity: 100,
+      boxEnabled: true,
+      boxColor: '#000000',
+      boxOpacity: 75,
+      boxPadding: 8,
+      boxRadius: 8,
+      strokeEnabled: true,
+      strokeColor: '#000000',
+      strokeWidth: 2,
+      shadowEnabled: true,
+      shadowColor: '#000000',
+      shadowBlur: 4,
+      positionPreset: 'lower_third',
+      x: 50,
+      y: 75,
+      animation: 'slide_up',
+      animationDuration: 0.4,
+    },
+  ]);
+  const [selectedTextId, setSelectedTextId] = useState<string | null>('text_init_1');
+
   // Watermark removal config (defaults to bottom-right watermark delogo)
   const [watermarkConfig, setWatermarkConfig] = useState<ObjectRemovalConfig>({
-    area: NOTEBOOKLM_PRESETS['9:16'].area, // { x: 70, y: 95.2, width: 28, height: 3.8 }
+    area: NOTEBOOKLM_PRESETS['9:16'].area,
     method: 'delogo',
     feather: 5,
     coverColor: '#020617',
@@ -182,6 +223,14 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
       return;
     }
 
+    if (activeTool === 'text') {
+      const valid = textItems.filter((t) => t.text.trim().length > 0);
+      if (valid.length === 0) {
+        onShowToast('Vui lòng nhập ít nhất một nội dung chữ.', 'error');
+        return;
+      }
+    }
+
     try {
       setIsProcessing(true);
       abortControllerRef.current = new AbortController();
@@ -202,6 +251,17 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
         res = await videoProcessor.mergeVideos(
           {
             items: mergeItems,
+            quality: outputQuality,
+            autoTransitions,
+          },
+          (progress) => setProcessingProgress(progress),
+          abortControllerRef.current.signal
+        );
+      } else if (activeTool === 'text' && currentVideo) {
+        res = await videoProcessor.renderTextOverlay(
+          {
+            video: currentVideo,
+            textItems,
             quality: outputQuality,
           },
           (progress) => setProcessingProgress(progress),
@@ -294,6 +354,18 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
       icon: <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />,
     },
     {
+      id: 'text',
+      label: 'Thêm Chữ / Sub',
+      desc: 'Font chữ, hiệu ứng động',
+      icon: <Type className="w-4 h-4 text-pink-400 shrink-0" />,
+    },
+    {
+      id: 'merge',
+      label: 'Ghép Video',
+      desc: 'Nối clip + Chuyển cảnh',
+      icon: <Layers className="w-4 h-4 text-indigo-400 shrink-0" />,
+    },
+    {
       id: 'watermark',
       label: 'Xóa Logo / Mask',
       desc: 'Loại bỏ watermark/vật thể',
@@ -304,12 +376,6 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
       label: 'Cắt Video',
       desc: 'Cắt chính xác mili-giây',
       icon: <Scissors className="w-4 h-4 shrink-0" />,
-    },
-    {
-      id: 'merge',
-      label: 'Ghép Video',
-      desc: 'Nối nhiều clip liên tiếp',
-      icon: <Layers className="w-4 h-4 shrink-0" />,
     },
   ];
 
@@ -325,9 +391,9 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
       {/* Main Workspace (Preview + Controls) */}
       {currentVideo && !operationResult && (
         <div className="space-y-3.5 sm:space-y-5">
-          {/* Tool Segmented Bar with Glassmorphism: 2x2 on mobile, 4-col on tablet/desktop */}
+          {/* Tool Segmented Bar with Glassmorphism: 2x3 on mobile, 5-col on tablet/desktop */}
           <div className="glass-panel p-1.5 rounded-2xl shadow-xl shadow-black/30">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
               {tools.map((t) => {
                 const isSelected = activeTool === t.id;
                 return (
@@ -363,7 +429,20 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
                     : undefined
                 }
                 overlayNode={
-                  activeTool === 'watermark' || activeTool === 'unified' ? (
+                  activeTool === 'text' ? (
+                    <TextOverlayCanvas
+                      items={textItems}
+                      selectedId={selectedTextId}
+                      onSelectItem={setSelectedTextId}
+                      onUpdateItemPosition={(id, x, y) => {
+                        setTextItems((prev) =>
+                          prev.map((it) => (it.id === id ? { ...it, positionPreset: 'custom', x, y } : it))
+                        );
+                      }}
+                      currentTime={currentTime}
+                      totalDuration={currentVideo.metadata.duration || 10}
+                    />
+                  ) : activeTool === 'watermark' || activeTool === 'unified' ? (
                     <ObjectRemovalOverlay
                       config={watermarkConfig}
                       onChange={setWatermarkConfig}
@@ -394,6 +473,17 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
                 />
               )}
 
+              {activeTool === 'text' && (
+                <TextOverlayEditor
+                  items={textItems}
+                  selectedId={selectedTextId}
+                  onSelectId={setSelectedTextId}
+                  onItemsChange={setTextItems}
+                  currentTime={currentTime}
+                  totalDuration={currentVideo.metadata.duration || 10}
+                />
+              )}
+
               {activeTool === 'trim' && (
                 <TrimControls
                   duration={currentVideo.metadata.duration}
@@ -415,6 +505,8 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
                     setTrimConfig({ startTime: 0, endTime: v.metadata.duration || 5 });
                   }}
                   selectedPreviewId={currentVideo.id}
+                  autoTransitions={autoTransitions}
+                  onToggleAutoTransitions={setAutoTransitions}
                 />
               )}
 
@@ -443,7 +535,8 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
                   <Play className="w-4 h-4 fill-white" />
                   <span>
                     {activeTool === 'trim' && 'Tiến hành Cắt Video'}
-                    {activeTool === 'merge' && `Ghép ${mergeItems.length} Video`}
+                    {activeTool === 'merge' && `Ghép ${mergeItems.length} Video với Chuyển Cảnh`}
+                    {activeTool === 'text' && 'Xuất Video Có Lớp Chữ Chuyên Nghiệp'}
                     {activeTool === 'watermark' &&
                       (watermarkConfig.method === 'cover'
                         ? 'Bắt đầu Che phủ Logo / Object'
