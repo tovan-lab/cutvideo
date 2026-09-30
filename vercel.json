@@ -4,6 +4,10 @@
     {
       "source": "/api/ai-content/:action*",
       "destination": "/api/ai-content?action=:action*"
+    },
+    {
+      "source": "/api/health",
+      "destination": "/api/index"
     }
   ]
 }
