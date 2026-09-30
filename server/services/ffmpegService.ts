@@ -108,12 +108,19 @@ export interface ServerAllInOneOptions {
     area: MaskArea;
     color?: string;
     feather?: number;
+    targetClipIndex?: number | 'all';
+    timeRange?: {
+      startSec: number;
+      endSec: number;
+    };
   };
   textItems?: ServerTextItem[];
   merge?: {
     enabled: boolean;
     transitions?: ServerTransition[];
     autoTransitions?: boolean;
+    defaultTransition?: string;
+    transitionDuration?: number;
   };
   quality?: '1080p' | '720p' | '480p' | 'original';
 }
@@ -958,8 +965,12 @@ export class ServerFFmpegService {
       return filters;
     };
 
-    const buildWatermarkFilter = (w: number, h: number) => {
-      if (!watermark || !watermark.enabled) return null;
+    const buildWatermarkFilter = (
+      w: number,
+      h: number,
+      timeConstraint?: { startSec: number; endSec: number }
+    ) => {
+      if (!watermark || watermark.enabled === false) return null;
       const area = watermark.area;
       const rawBx = Math.round((area.x / 100) * w);
       const rawBy = Math.round((area.y / 100) * h);
@@ -971,11 +982,19 @@ export class ServerFFmpegService {
       const bw = Math.max(4, Math.min(w - bx - 2, rawBw));
       const bh = Math.max(4, Math.min(h - by - 2, rawBh));
 
+      let enableClause = '';
+      if (
+        timeConstraint &&
+        (timeConstraint.startSec > 0 || (timeConstraint.endSec > 0 && timeConstraint.endSec < 999999))
+      ) {
+        enableClause = `:enable='between(t\\,${timeConstraint.startSec.toFixed(2)}\\,${timeConstraint.endSec.toFixed(2)})'`;
+      }
+
       if (watermark.method === 'cover') {
         const hex = watermark.color || '#020617';
-        return `drawbox=x=${bx}:y=${by}:w=${bw}:h=${bh}:color=${hex}:t=fill`;
+        return `drawbox=x=${bx}:y=${by}:w=${bw}:h=${bh}:color=${hex}:t=fill${enableClause}`;
       }
-      return `delogo=x=${bx}:y=${by}:w=${bw}:h=${bh}`;
+      return `delogo=x=${bx}:y=${by}:w=${bw}:h=${bh}${enableClause}`;
     };
 
     try {
@@ -1002,7 +1021,7 @@ export class ServerFFmpegService {
         targetWidth = targetWidth % 2 === 0 ? targetWidth : targetWidth - 1;
         targetHeight = targetHeight % 2 === 0 ? targetHeight : targetHeight - 1;
 
-        const autoPool = ['smoothleft', 'dissolve', 'fade', 'smoothright', 'zoomin', 'fadeblack'];
+        const autoPool = ['smoothleft', 'dissolve', 'fade', 'smoothright', 'zoomin', 'fadeblack', 'circlecrop', 'wipeleft'];
         const args: string[] = [];
         const filterComplex: string[] = [];
 
@@ -1028,19 +1047,22 @@ export class ServerFFmpegService {
         let lastVideoLabel = 'v0';
         let lastAudioLabel = 'a0';
         let totalEstDuration = probes[0].duration || 5;
+        const clipOffsets: number[] = [0];
 
         for (let i = 1; i < inputPaths.length; i++) {
           const prevDuration = probes[i - 1].duration || 5;
           const nextDuration = probes[i].duration || 5;
           let transType = 'fade';
-          let transDur = 0.75;
+          let transDur = merge?.transitionDuration || 0.75;
 
           if (merge?.autoTransitions) {
             transType = autoPool[(i - 1) % autoPool.length];
             transDur = 0.75;
           } else if (merge?.transitions && merge.transitions[i - 1]) {
             transType = merge.transitions[i - 1].type || 'fade';
-            transDur = merge.transitions[i - 1].duration || 0.75;
+            transDur = merge.transitions[i - 1].duration || transDur;
+          } else if (merge?.defaultTransition) {
+            transType = merge.defaultTransition;
           }
 
           if (transType === 'none') {
@@ -1055,6 +1077,7 @@ export class ServerFFmpegService {
             currentOffset = currentOffset + prevDuration - transDur;
           }
           currentOffset = Math.max(0.1, Number(currentOffset.toFixed(2)));
+          clipOffsets.push(currentOffset);
           totalEstDuration = currentOffset + nextDuration;
 
           const outV = `vm${i}`;
@@ -1071,8 +1094,32 @@ export class ServerFFmpegService {
           lastAudioLabel = outA;
         }
 
+        // Determine watermark time constraint in merged timeline
+        let wmTimeConstraint: { startSec: number; endSec: number } | undefined = undefined;
+        if (watermark && watermark.enabled !== false) {
+          if (watermark.targetClipIndex !== undefined && watermark.targetClipIndex !== 'all') {
+            const k = Math.max(0, Math.min(inputPaths.length - 1, Number(watermark.targetClipIndex)));
+            const cStart = clipOffsets[k] || 0;
+            const cDur = probes[k].duration || 5;
+            const cEnd = k === inputPaths.length - 1 ? totalEstDuration : ((clipOffsets[k + 1] || totalEstDuration) + 0.75);
+
+            if (watermark.timeRange && (watermark.timeRange.startSec > 0 || watermark.timeRange.endSec > 0)) {
+              const rStart = cStart + (watermark.timeRange.startSec || 0);
+              const rEnd = watermark.timeRange.endSec ? (cStart + watermark.timeRange.endSec) : cEnd;
+              wmTimeConstraint = { startSec: rStart, endSec: Math.min(cEnd, rEnd) };
+            } else {
+              wmTimeConstraint = { startSec: cStart, endSec: cEnd };
+            }
+          } else if (watermark.timeRange && (watermark.timeRange.startSec > 0 || watermark.timeRange.endSec > 0)) {
+            wmTimeConstraint = {
+              startSec: watermark.timeRange.startSec,
+              endSec: watermark.timeRange.endSec || totalEstDuration,
+            };
+          }
+        }
+
         const postFilters: string[] = [];
-        const wmFilter = buildWatermarkFilter(targetWidth, targetHeight);
+        const wmFilter = buildWatermarkFilter(targetWidth, targetHeight, wmTimeConstraint);
         if (wmFilter) {
           postFilters.push(wmFilter);
         }
@@ -1127,8 +1174,18 @@ export class ServerFFmpegService {
         }
         args.push('-i', inputPath);
 
+        const effDuration = (trim?.enabled ? trim.endSec - trim.startSec : probe.duration) || probe.duration;
+
+        let wmTimeConstraint: { startSec: number; endSec: number } | undefined = undefined;
+        if (watermark && watermark.enabled !== false && watermark.timeRange && (watermark.timeRange.startSec > 0 || watermark.timeRange.endSec > 0)) {
+          wmTimeConstraint = {
+            startSec: watermark.timeRange.startSec,
+            endSec: watermark.timeRange.endSec || effDuration,
+          };
+        }
+
         const filters: string[] = [];
-        const wmFilter = buildWatermarkFilter(width, height);
+        const wmFilter = buildWatermarkFilter(width, height, wmTimeConstraint);
         if (wmFilter) {
           filters.push(wmFilter);
         }

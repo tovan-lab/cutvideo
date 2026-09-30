@@ -15,8 +15,13 @@ import {
   CheckCircle,
   Cpu,
   ShieldAlert,
+  Clock,
+  Film,
+  XCircle,
+  ToggleLeft,
+  ToggleRight,
 } from 'lucide-react';
-import { BoundingBox, ObjectRemovalConfig, ObjectRemovalMethod } from '../../types/video';
+import { BoundingBox, MergeItem, ObjectRemovalConfig, ObjectRemovalMethod } from '../../types/video';
 import { aiInpaintingClientService, InpaintingHealthStatus } from '../../services/aiInpaintingService';
 
 interface ObjectRemovalSelectorProps {
@@ -24,6 +29,9 @@ interface ObjectRemovalSelectorProps {
   onChange: (config: ObjectRemovalConfig) => void;
   onPreview3s?: () => void;
   isPreviewing?: boolean;
+  mergeItems?: MergeItem[];
+  currentTime?: number;
+  totalDuration?: number;
 }
 
 export const ObjectRemovalSelector: React.FC<ObjectRemovalSelectorProps> = ({
@@ -31,6 +39,9 @@ export const ObjectRemovalSelector: React.FC<ObjectRemovalSelectorProps> = ({
   onChange,
   onPreview3s,
   isPreviewing = false,
+  mergeItems = [],
+  currentTime = 0,
+  totalDuration = 10,
 }) => {
   const [showAiEngineModal, setShowAiEngineModal] = useState(false);
   const [healthStatus, setHealthStatus] = useState<InpaintingHealthStatus | null>(null);
@@ -171,6 +182,218 @@ export const ObjectRemovalSelector: React.FC<ObjectRemovalSelectorProps> = ({
           <span>{config.showMaskOverlay ? 'Đang hiện Mask' : 'Ẩn Mask'}</span>
         </button>
       </div>
+
+      {/* Enable / Disable Watermark Toggle Banner */}
+      <div
+        className={`p-3 rounded-xl border flex flex-wrap items-center justify-between gap-2.5 transition-all ${
+          config.enabled !== false
+            ? 'bg-indigo-950/40 border-indigo-700/50'
+            : 'bg-slate-950/80 border-slate-800'
+        }`}
+      >
+        <div className="flex items-center gap-2">
+          {config.enabled !== false ? (
+            <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+          ) : (
+            <XCircle className="w-4 h-4 text-slate-500 shrink-0" />
+          )}
+          <div>
+            <p className="text-xs font-semibold text-white">
+              {config.enabled !== false
+                ? 'Đang bật tính năng xóa Watermark'
+                : 'Đã ẩn / Bỏ qua xóa Watermark (Clip không có logo)'}
+            </p>
+            <p className="text-[11px] text-slate-400">
+              {config.enabled !== false
+                ? 'Bộ lọc sẽ xóa sạch watermark tại vùng chọn khi xuất video'
+                : 'Video sẽ giữ nguyên gốc không áp dụng lớp xóa logo nào'}
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() =>
+            onChange({
+              ...config,
+              enabled: config.enabled === false ? true : false,
+            })
+          }
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all shadow-sm ${
+            config.enabled !== false
+              ? 'bg-rose-950/50 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60'
+              : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+          }`}
+        >
+          {config.enabled !== false ? (
+            <>
+              <EyeOff className="w-3.5 h-3.5" />
+              <span>Ẩn / Không xóa Watermark nữa</span>
+            </>
+          ) : (
+            <>
+              <Eraser className="w-3.5 h-3.5" />
+              <span>Bật lại Xóa Watermark</span>
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Target Clip & Time Range Selection */}
+      {config.enabled !== false && (
+        <div className="p-3 bg-slate-950/70 border border-slate-800/80 rounded-xl space-y-3">
+          {/* If multiple clips exist */}
+          {mergeItems.length > 1 && (
+            <div className="space-y-1.5">
+              <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                <Film className="w-3.5 h-3.5 text-indigo-400" />
+                Chọn video áp dụng xóa Watermark:
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => onChange({ ...config, targetClipIndex: 'all' })}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                    config.targetClipIndex === 'all' || config.targetClipIndex === undefined
+                      ? 'bg-indigo-600 border-indigo-500 text-white'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  🌐 Tất cả các clip trong chuỗi
+                </button>
+                {mergeItems.map((item, idx) => {
+                  const isSelected = config.targetClipIndex === idx;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => onChange({ ...config, targetClipIndex: idx })}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all truncate max-w-[160px] ${
+                        isSelected
+                          ? 'bg-indigo-600 border-indigo-500 text-white'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      #{idx + 1}: {item.video.name}
+                    </button>
+                  );
+                })}
+              </div>
+              {typeof config.targetClipIndex === 'number' && (
+                <p className="text-[11px] text-indigo-300">
+                  👉 Watermark sẽ chỉ được xóa trên <strong>Clip #{config.targetClipIndex + 1}</strong>. Các clip khác sẽ giữ nguyên không xóa logo.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Time range: từ mấy giây đến mấy giây */}
+          <div className="space-y-2 pt-1 border-t border-slate-800/60">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-indigo-400" />
+                Khoảng thời gian xóa (từ mấy giây đến mấy giây):
+              </span>
+              <label className="flex items-center gap-1.5 text-[11px] font-normal text-slate-400 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={config.applyEntireVideo}
+                  onChange={(e) => {
+                    const applyAll = e.target.checked;
+                    onChange({
+                      ...config,
+                      applyEntireVideo: applyAll,
+                      timeRange: applyAll ? undefined : (config.timeRange || { startSec: 0, endSec: totalDuration }),
+                    });
+                  }}
+                  className="rounded accent-indigo-500 cursor-pointer"
+                />
+                <span>Toàn bộ thời lượng</span>
+              </label>
+            </div>
+
+            {!config.applyEntireVideo && (
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-[11px] text-slate-400">
+                    <span>Từ giây:</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onChange({
+                          ...config,
+                          timeRange: {
+                            startSec: Number(currentTime.toFixed(1)),
+                            endSec: config.timeRange?.endSec ?? totalDuration,
+                          },
+                        })
+                      }
+                      className="text-[10px] text-indigo-400 hover:underline"
+                    >
+                      Lấy hiện tại ({currentTime.toFixed(1)}s)
+                    </button>
+                  </div>
+                  <input
+                    type="number"
+                    step={0.1}
+                    min={0}
+                    max={totalDuration}
+                    value={config.timeRange?.startSec ?? 0}
+                    onChange={(e) =>
+                      onChange({
+                        ...config,
+                        timeRange: {
+                          startSec: Number(e.target.value),
+                          endSec: config.timeRange?.endSec ?? totalDuration,
+                        },
+                      })
+                    }
+                    className="w-full px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-white text-xs font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-[11px] text-slate-400">
+                    <span>Đến giây:</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onChange({
+                          ...config,
+                          timeRange: {
+                            startSec: config.timeRange?.startSec ?? 0,
+                            endSec: Number(currentTime.toFixed(1)),
+                          },
+                        })
+                      }
+                      className="text-[10px] text-indigo-400 hover:underline"
+                    >
+                      Lấy hiện tại ({currentTime.toFixed(1)}s)
+                    </button>
+                  </div>
+                  <input
+                    type="number"
+                    step={0.1}
+                    min={(config.timeRange?.startSec ?? 0) + 0.1}
+                    max={totalDuration}
+                    value={config.timeRange?.endSec ?? totalDuration}
+                    onChange={(e) =>
+                      onChange({
+                        ...config,
+                        timeRange: {
+                          startSec: config.timeRange?.startSec ?? 0,
+                          endSec: Number(e.target.value),
+                        },
+                      })
+                    }
+                    className="w-full px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-white text-xs font-mono"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 1. Method Selection */}
       <div className="space-y-2">
@@ -522,6 +745,10 @@ export const ObjectRemovalOverlay: React.FC<{
 }> = ({ config, onChange, isPreviewMode = false }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [activeAction, setActiveAction] = useState<'move' | 'nw' | 'ne' | 'se' | 'sw' | null>(null);
+
+  if (config.enabled === false) {
+    return null;
+  }
 
   if (isPreviewMode) {
     return (

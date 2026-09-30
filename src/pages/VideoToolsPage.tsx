@@ -394,6 +394,30 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
     }
   };
 
+  const totalMergeDuration = React.useMemo(() => {
+    if (mergeItems.length === 0) return currentVideo?.metadata.duration || 10;
+    if (mergeItems.length === 1) {
+      const it = mergeItems[0];
+      return it.trimConfig
+        ? Math.max(0.1, it.trimConfig.endTime - it.trimConfig.startTime)
+        : (it.video.metadata.duration || 10);
+    }
+    const transDur = 0.75;
+    let total = 0;
+    for (let i = 0; i < mergeItems.length; i++) {
+      const it = mergeItems[i];
+      const effDur = it.trimConfig
+        ? Math.max(0.1, it.trimConfig.endTime - it.trimConfig.startTime)
+        : (it.video.metadata.duration || 5);
+      if (i === 0) {
+        total += effDur;
+      } else {
+        total += Math.max(0.1, effDur - transDur);
+      }
+    }
+    return Math.max(1, Number(total.toFixed(2)));
+  }, [mergeItems, currentVideo]);
+
   const tools: Array<{ id: ToolType; label: string; desc: string; icon: React.ReactNode }> = [
     {
       id: 'unified',
@@ -685,7 +709,8 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
                   onSelectId={setSelectedTextId}
                   onItemsChange={setTextItems}
                   currentTime={currentTime}
-                  totalDuration={currentVideo.metadata.duration || 10}
+                  totalDuration={mergeItems.length > 1 ? totalMergeDuration : (currentVideo.metadata.duration || 10)}
+                  mergeItems={mergeItems}
                 />
               )}
 
@@ -789,6 +814,9 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
                   onChange={setWatermarkConfig}
                   onPreview3s={handlePreview3s}
                   isPreviewing={isProcessing}
+                  mergeItems={mergeItems}
+                  currentTime={currentTime}
+                  totalDuration={mergeItems.length > 1 ? totalMergeDuration : (currentVideo.metadata.duration || 10)}
                 />
               )}
 
@@ -897,16 +925,21 @@ export const VideoToolsPage: React.FC<VideoToolsPageProps> = ({
                 endSec: trimConfig.endTime,
               },
               clipTrims: clipTrims && clipTrims.length > 0 ? clipTrims : undefined,
-              watermark: {
-                enabled: true,
-                method:
-                  watermarkConfig.method === 'ai_inpaint'
-                    ? 'blur'
-                    : watermarkConfig.method,
-                area: watermarkConfig.area,
-                coverColor: watermarkConfig.coverColor,
-                feather: watermarkConfig.feather,
-              },
+              watermark:
+                watermarkConfig.enabled !== false
+                  ? {
+                      enabled: true,
+                      method:
+                        watermarkConfig.method === 'ai_inpaint'
+                          ? 'blur'
+                          : watermarkConfig.method,
+                      area: watermarkConfig.area,
+                      coverColor: watermarkConfig.coverColor,
+                      feather: watermarkConfig.feather,
+                      targetClipIndex: watermarkConfig.targetClipIndex,
+                      timeRange: watermarkConfig.timeRange,
+                    }
+                  : undefined,
               textItems: textItems.filter((t) => t.text.trim().length > 0),
               merge:
                 mergeItems.length > 1

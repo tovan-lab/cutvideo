@@ -383,12 +383,39 @@ export const VideoPreviewModal: React.FC<VideoPreviewModalProps> = ({
             />
 
             {/* Clean Simulated Watermark Removal Layer */}
-            {enableWatermark && watermarkConfig && (
-              <ObjectRemovalOverlay
-                config={watermarkConfig}
-                onChange={() => {}}
-                isPreviewMode={true}
-              />
+            {enableWatermark && watermarkConfig && watermarkConfig.enabled !== false && (
+              (() => {
+                if (
+                  watermarkConfig.targetClipIndex !== undefined &&
+                  watermarkConfig.targetClipIndex !== 'all' &&
+                  activeClipIndex !== Number(watermarkConfig.targetClipIndex)
+                ) {
+                  return null;
+                }
+                if (
+                  watermarkConfig.timeRange &&
+                  (watermarkConfig.timeRange.startSec > 0 || watermarkConfig.timeRange.endSec > 0)
+                ) {
+                  const clipElapsed = globalCurrentTime - (clipStarts[activeClipIndex] || 0);
+                  const effectiveT =
+                    watermarkConfig.targetClipIndex === 'all' || watermarkConfig.targetClipIndex === undefined
+                      ? globalCurrentTime
+                      : clipElapsed;
+                  if (
+                    effectiveT < (watermarkConfig.timeRange.startSec || 0) ||
+                    effectiveT > (watermarkConfig.timeRange.endSec || totalDuration)
+                  ) {
+                    return null;
+                  }
+                }
+                return (
+                  <ObjectRemovalOverlay
+                    config={watermarkConfig}
+                    onChange={() => {}}
+                    isPreviewMode={true}
+                  />
+                );
+              })()
             )}
 
             {/* Clean Text Overlay Layer */}

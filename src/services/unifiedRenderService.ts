@@ -363,6 +363,8 @@ export class UnifiedRenderService {
             area: watermark.area,
             color: watermark.coverColor,
             feather: watermark.feather,
+            targetClipIndex: watermark.targetClipIndex,
+            timeRange: watermark.timeRange,
           }
         : undefined,
       textItems: textItems && textItems.length > 0 ? textItems : undefined,
@@ -371,6 +373,8 @@ export class UnifiedRenderService {
             enabled: true,
             transitions: merge.transitions,
             autoTransitions: merge.autoTransitions,
+            defaultTransition: merge.defaultTransition,
+            transitionDuration: merge.transitionDuration,
           }
         : undefined,
       quality: quality || 'original',

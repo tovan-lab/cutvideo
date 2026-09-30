@@ -16,11 +16,21 @@ export type TransitionType =
   | 'slidedown'
   | 'wipeleft'
   | 'wiperight'
+  | 'wipeup'
+  | 'wipedown'
   | 'circlecrop'
   | 'circleopen'
+  | 'circleclose'
+  | 'rectcrop'
+  | 'distance'
   | 'zoomin'
   | 'pixelize'
+  | 'radial'
   | 'hblur'
+  | 'squeezeh'
+  | 'squeezev'
+  | 'hlslice'
+  | 'hrslice'
   | 'fadeblack'
   | 'fadewhite';
 
@@ -162,6 +172,12 @@ export interface ObjectRemovalConfig {
   tracking: boolean;
   applyEntireVideo: boolean;
   showMaskOverlay?: boolean;
+  enabled?: boolean; // Tắt/ẩn xóa watermark nếu clip không có watermark (mặc định true)
+  targetClipIndex?: number | 'all'; // Áp dụng cho toàn bộ hay chỉ clip cụ thể
+  timeRange?: {
+    startSec: number;
+    endSec: number;
+  };
 }
 
 export interface WatermarkPreset {
@@ -202,6 +218,11 @@ export interface UnifiedEditPlan {
     area: BoundingBox;
     coverColor?: string;
     feather?: number;
+    targetClipIndex?: number | 'all';
+    timeRange?: {
+      startSec: number;
+      endSec: number;
+    };
   };
   quality: OutputQuality;
 }
@@ -224,12 +245,19 @@ export interface AllInOnePlan {
     area: BoundingBox;
     coverColor?: string;
     feather?: number;
+    targetClipIndex?: number | 'all';
+    timeRange?: {
+      startSec: number;
+      endSec: number;
+    };
   };
   textItems?: TextOverlayItem[];
   merge?: {
     enabled: boolean;
     transitions?: { index: number; type: TransitionType; duration: number }[];
     autoTransitions?: boolean;
+    defaultTransition?: TransitionType;
+    transitionDuration?: number;
   };
   quality: OutputQuality;
 }

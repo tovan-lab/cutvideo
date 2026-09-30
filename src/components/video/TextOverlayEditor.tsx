@@ -17,6 +17,7 @@ import {
   Move,
 } from 'lucide-react';
 import {
+  MergeItem,
   TextAnimationType,
   TextFontFamily,
   TextOverlayItem,
@@ -30,6 +31,7 @@ interface TextOverlayEditorProps {
   onItemsChange: (items: TextOverlayItem[]) => void;
   currentTime: number;
   totalDuration: number;
+  mergeItems?: MergeItem[];
 }
 
 const FONTS: Array<{ id: TextFontFamily; name: string; style: string }> = [
@@ -72,8 +74,39 @@ export const TextOverlayEditor: React.FC<TextOverlayEditorProps> = ({
   onItemsChange,
   currentTime,
   totalDuration,
+  mergeItems = [],
 }) => {
   const activeItem = items.find((it) => it.id === selectedId) || items[0] || null;
+
+  // Calculate each clip's time range inside the total combined video
+  const clipSlices = React.useMemo(() => {
+    if (!mergeItems || mergeItems.length <= 1) return [];
+    const slices: Array<{
+      index: number;
+      name: string;
+      start: number;
+      end: number;
+      duration: number;
+    }> = [];
+    let currentStart = 0;
+    const transDur = 0.75;
+    for (let i = 0; i < mergeItems.length; i++) {
+      const it = mergeItems[i];
+      const effDur = it.trimConfig
+        ? Math.max(0.1, it.trimConfig.endTime - it.trimConfig.startTime)
+        : (it.video.metadata.duration || 5);
+      const end = currentStart + effDur;
+      slices.push({
+        index: i,
+        name: it.video.name,
+        start: Number(currentStart.toFixed(2)),
+        end: Number(end.toFixed(2)),
+        duration: Number(effDur.toFixed(2)),
+      });
+      currentStart = Math.max(0, end - transDur);
+    }
+    return slices;
+  }, [mergeItems]);
 
   const handleAddNewItem = () => {
     const newItem: TextOverlayItem = {
@@ -526,11 +559,16 @@ export const TextOverlayEditor: React.FC<TextOverlayEditorProps> = ({
           </div>
 
           {/* Timeline / Duration */}
-          <div className="space-y-2 p-3 bg-slate-950/60 rounded-xl border border-slate-800/80">
+          <div className="space-y-2.5 p-3 bg-slate-950/60 rounded-xl border border-slate-800/80">
             <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
               <span className="flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5 text-pink-400" />
                 <span>Thời gian xuất hiện:</span>
+                {mergeItems.length > 1 && (
+                  <span className="text-[10px] text-indigo-400 font-normal ml-1">
+                    (Tổng chuỗi: {totalDuration.toFixed(1)}s - {mergeItems.length} clip)
+                  </span>
+                )}
               </span>
               <label className="flex items-center gap-1.5 text-[11px] font-normal text-slate-400 cursor-pointer">
                 <input
@@ -542,6 +580,40 @@ export const TextOverlayEditor: React.FC<TextOverlayEditorProps> = ({
                 <span>Suốt video</span>
               </label>
             </div>
+
+            {/* Quick Clip Selector when multiple clips exist */}
+            {clipSlices.length > 1 && !activeItem.fullDuration && (
+              <div className="space-y-1.5 p-2 bg-slate-900/80 rounded-lg border border-indigo-500/20">
+                <span className="text-[11px] text-indigo-300 font-medium block">
+                  ⚡ Gán nhanh thời gian xuất hiện theo từng Clip ghép:
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => updateActive({ startTime: 0, endTime: totalDuration, fullDuration: false })}
+                    className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] border border-slate-700 font-medium transition"
+                  >
+                    Toàn bộ video (0s - {totalDuration.toFixed(1)}s)
+                  </button>
+                  {clipSlices.map((slice) => (
+                    <button
+                      key={slice.index}
+                      type="button"
+                      onClick={() =>
+                        updateActive({
+                          startTime: slice.start,
+                          endTime: slice.end,
+                          fullDuration: false,
+                        })
+                      }
+                      className="px-2 py-1 rounded bg-indigo-950/60 hover:bg-indigo-900/80 border border-indigo-700/50 text-indigo-200 text-[10px] font-mono transition"
+                    >
+                      #{slice.index + 1}: {slice.start}s - {slice.end}s
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {!activeItem.fullDuration && (
               <div className="grid grid-cols-2 gap-3 pt-1">
@@ -581,7 +653,7 @@ export const TextOverlayEditor: React.FC<TextOverlayEditorProps> = ({
                   <input
                     type="number"
                     step={0.1}
-                    min={activeItem.startTime + 0.5}
+                    min={activeItem.startTime + 0.1}
                     max={totalDuration}
                     value={activeItem.endTime}
                     onChange={(e) => updateActive({ endTime: Number(e.target.value) })}

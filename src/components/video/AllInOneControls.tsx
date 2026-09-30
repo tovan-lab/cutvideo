@@ -9,6 +9,7 @@ import {
   CheckCircle,
   Plus,
   Eye,
+  EyeOff,
   Zap,
   Sliders,
   ExternalLink,
@@ -16,6 +17,9 @@ import {
   ArrowDown,
   Trash2,
   Film,
+  Clock,
+  XCircle,
+  Wand2,
 } from 'lucide-react';
 import {
   AllInOnePlan,
@@ -26,9 +30,49 @@ import {
   OutputQuality,
   TextOverlayItem,
   ToolType,
+  TransitionType,
   TrimConfig,
   VideoItem,
 } from '../../types/video';
+
+export const ALL_TRANSITIONS: Array<{
+  id: string;
+  name: string;
+  icon: string;
+  category: string;
+  desc: string;
+}> = [
+  { id: 'auto', name: 'Auto Smart Pool', icon: '🎲', category: 'Tự động', desc: 'Luân phiên đổi kiểu thông minh mượt mà' },
+  { id: 'fade', name: 'Fade (Mờ dần)', icon: '🌟', category: 'Kinh điển', desc: 'Mờ dần vào clip tiếp theo' },
+  { id: 'fadeblack', name: 'Fade Black', icon: '🖤', category: 'Điện ảnh', desc: 'Mờ qua đen phim ảnh sâu lắng' },
+  { id: 'fadewhite', name: 'Fade White', icon: '🤍', category: 'Sôi động', desc: 'Chớp sáng trắng nổi bật' },
+  { id: 'dissolve', name: 'Dissolve (Hòa tan)', icon: '🌊', category: 'Mềm mại', desc: 'Hòa tan đan xen giữa hai khung hình' },
+  { id: 'smoothleft', name: 'Smooth Left', icon: '⬅️', category: 'Lướt êm', desc: 'Lướt mềm sang trái tự nhiên' },
+  { id: 'smoothright', name: 'Smooth Right', icon: '➡️', category: 'Lướt êm', desc: 'Lướt mềm sang phải tự nhiên' },
+  { id: 'smoothup', name: 'Smooth Up', icon: '⬆️', category: 'Lướt êm', desc: 'Lướt mềm từ dưới lên trên' },
+  { id: 'smoothdown', name: 'Smooth Down', icon: '⬇️', category: 'Lướt êm', desc: 'Lướt mềm từ trên xuống dưới' },
+  { id: 'slideleft', name: 'Slide Left', icon: '⏪', category: 'Trượt cảnh', desc: 'Đẩy khung hình sang trái' },
+  { id: 'slideright', name: 'Slide Right', icon: '⏩', category: 'Trượt cảnh', desc: 'Đẩy khung hình sang phải' },
+  { id: 'slideup', name: 'Slide Up', icon: '🔼', category: 'Trượt cảnh', desc: 'Đẩy khung hình từ dưới lên' },
+  { id: 'slidedown', name: 'Slide Down', icon: '🔽', category: 'Trượt cảnh', desc: 'Đẩy khung hình từ trên xuống' },
+  { id: 'wipeleft', name: 'Wipe Left', icon: '🪟', category: 'Gạt hình', desc: 'Gạt màn hình từ phải sang trái' },
+  { id: 'wiperight', name: 'Wipe Right', icon: '🪟', category: 'Gạt hình', desc: 'Gạt màn hình từ trái sang phải' },
+  { id: 'wipeup', name: 'Wipe Up', icon: '🪟', category: 'Gạt hình', desc: 'Gạt màn hình từ dưới lên' },
+  { id: 'wipedown', name: 'Wipe Down', icon: '🪟', category: 'Gạt hình', desc: 'Gạt màn hình từ trên xuống' },
+  { id: 'circlecrop', name: 'Circle Crop', icon: '⭕', category: 'Hình học', desc: 'Thu tròn vào tâm như ống kính máy ảnh' },
+  { id: 'circleopen', name: 'Circle Open', icon: '🔘', category: 'Hình học', desc: 'Mở rộng vòng tròn từ tâm' },
+  { id: 'circleclose', name: 'Circle Close', icon: '🔴', category: 'Hình học', desc: 'Đóng vòng tròn từ ngoài vào tâm' },
+  { id: 'rectcrop', name: 'Rect Crop', icon: '🔲', category: 'Hình học', desc: 'Thu khung chữ nhật sắc nét' },
+  { id: 'zoomin', name: 'Zoom In', icon: '💥', category: 'Hiệu ứng', desc: 'Phóng to bùng nổ thu hút mắt' },
+  { id: 'pixelize', name: 'Pixelize', icon: '👾', category: 'Kỹ thuật số', desc: 'Hiệu ứng vỡ điểm ảnh pixel' },
+  { id: 'radial', name: 'Radial Clock', icon: '💫', category: 'Xoay quét', desc: 'Quét cánh quạt đồng hồ 360 độ' },
+  { id: 'hblur', name: 'H-Blur', icon: '🌫️', category: 'Làm mờ', desc: 'Làm mờ chuyển động theo chiều ngang' },
+  { id: 'squeezeh', name: 'Squeeze H', icon: '↔️', category: 'Co giãn', desc: 'Nén co giãn ngang đàn hồi' },
+  { id: 'squeezev', name: 'Squeeze V', icon: '↕️', category: 'Co giãn', desc: 'Nén co giãn dọc đàn hồi' },
+  { id: 'hlslice', name: 'H-Slice', icon: '🥢', category: 'Cắt lát', desc: 'Cắt lát song song theo sọc ngang' },
+  { id: 'distance', name: 'Distance 3D', icon: '🌌', category: 'Chiều sâu', desc: 'Lùi sâu vào không gian 3 chiều' },
+  { id: 'none', name: 'None (Cắt thẳng)', icon: '🎬', category: 'Cơ bản', desc: 'Cắt thẳng liền mạch không hiệu ứng' },
+];
 
 interface AllInOneControlsProps {
   currentVideo: VideoItem;
@@ -81,9 +125,13 @@ export const AllInOneControls: React.FC<AllInOneControlsProps> = ({
 
   // Master toggles for the 4 features
   const [enableTrim, setEnableTrim] = useState(false);
-  const [enableWatermark, setEnableWatermark] = useState(true);
+  const [enableWatermark, setEnableWatermark] = useState(watermarkConfig.enabled !== false);
   const [enableMerge, setEnableMerge] = useState(mergeItems.length > 1);
   const [enableText, setEnableText] = useState(textItems.some((t) => t.text.trim().length > 0));
+
+  // Transitions
+  const [selectedTransition, setSelectedTransition] = useState<string>(autoTransitions ? 'auto' : 'fade');
+  const [transitionDuration, setTransitionDuration] = useState<number>(0.75);
 
   // Quick text input if user wants to add/edit inline
   const [quickText, setQuickText] = useState('');
@@ -201,22 +249,27 @@ export const AllInOneControls: React.FC<AllInOneControlsProps> = ({
           }
         : undefined,
       clipTrims: clipTrims && clipTrims.length > 0 ? clipTrims : undefined,
-      watermark: enableWatermark
-        ? {
-            enabled: true,
-            method: watermarkConfig.method === 'ai_inpaint' ? 'blur' : watermarkConfig.method,
-            area: watermarkConfig.area,
-            coverColor: watermarkConfig.coverColor,
-            feather: watermarkConfig.feather,
-          }
-        : undefined,
+      watermark:
+        enableWatermark && watermarkConfig.enabled !== false
+          ? {
+              enabled: true,
+              method: watermarkConfig.method === 'ai_inpaint' ? 'blur' : watermarkConfig.method,
+              area: watermarkConfig.area,
+              coverColor: watermarkConfig.coverColor,
+              feather: watermarkConfig.feather,
+              targetClipIndex: watermarkConfig.targetClipIndex,
+              timeRange: watermarkConfig.timeRange,
+            }
+          : undefined,
       textItems: enableText
         ? textItems.filter((t) => t.text.trim().length > 0)
         : undefined,
       merge: enableMerge && mergeItems.length > 1
         ? {
             enabled: true,
-            autoTransitions,
+            autoTransitions: selectedTransition === 'auto',
+            defaultTransition: selectedTransition !== 'auto' ? (selectedTransition as TransitionType) : undefined,
+            transitionDuration: transitionDuration,
           }
         : undefined,
       quality,
@@ -344,7 +397,7 @@ export const AllInOneControls: React.FC<AllInOneControlsProps> = ({
       {/* Feature 2: Xóa Watermark / Logo */}
       <div
         className={`rounded-2xl border p-3 transition-all ${
-          enableWatermark
+          enableWatermark && watermarkConfig.enabled !== false
             ? 'bg-slate-900/80 border-amber-500/40 shadow-sm shadow-amber-500/10'
             : 'bg-slate-950/40 border-slate-800/60 opacity-80'
         }`}
@@ -353,8 +406,12 @@ export const AllInOneControls: React.FC<AllInOneControlsProps> = ({
           <label className="flex items-center gap-2.5 cursor-pointer select-none">
             <input
               type="checkbox"
-              checked={enableWatermark}
-              onChange={(e) => setEnableWatermark(e.target.checked)}
+              checked={enableWatermark && watermarkConfig.enabled !== false}
+              onChange={(e) => {
+                const val = e.target.checked;
+                setEnableWatermark(val);
+                onChangeWatermarkConfig((p) => ({ ...p, enabled: val }));
+              }}
               className="w-4 h-4 rounded border-slate-700 text-amber-500 focus:ring-amber-500 bg-slate-900 cursor-pointer"
             />
             <div className="flex items-center gap-2">
@@ -363,20 +420,46 @@ export const AllInOneControls: React.FC<AllInOneControlsProps> = ({
             </div>
           </label>
 
-          {enableWatermark && (
-            <button
-              type="button"
-              onClick={() => onSwitchToolTab('watermark')}
-              className="flex items-center gap-1 text-[11px] font-semibold text-amber-400 hover:text-amber-300 px-2 py-1 rounded-lg bg-amber-950/40 border border-amber-500/20"
-            >
-              <Sliders className="w-3 h-3" />
-              <span>Chỉnh vùng</span>
-            </button>
-          )}
+          <div className="flex items-center gap-1.5">
+            {enableWatermark && watermarkConfig.enabled !== false ? (
+              <button
+                type="button"
+                onClick={() => onChangeWatermarkConfig((p) => ({ ...p, enabled: false }))}
+                className="flex items-center gap-1 text-[10px] font-semibold text-rose-300 hover:text-rose-200 px-2 py-1 rounded-lg bg-rose-950/40 border border-rose-800/40"
+                title="Bấm để ẩn / không xóa watermark cho video này"
+              >
+                <EyeOff className="w-3 h-3" />
+                <span>Ẩn / Không xóa</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setEnableWatermark(true);
+                  onChangeWatermarkConfig((p) => ({ ...p, enabled: true }));
+                }}
+                className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400 hover:text-emerald-300 px-2 py-1 rounded-lg bg-emerald-950/40 border border-emerald-800/40"
+              >
+                <CheckCircle className="w-3 h-3" />
+                <span>Bật xóa</span>
+              </button>
+            )}
+
+            {enableWatermark && watermarkConfig.enabled !== false && (
+              <button
+                type="button"
+                onClick={() => onSwitchToolTab('watermark')}
+                className="flex items-center gap-1 text-[11px] font-semibold text-amber-400 hover:text-amber-300 px-2 py-1 rounded-lg bg-amber-950/40 border border-amber-500/20"
+              >
+                <Sliders className="w-3 h-3" />
+                <span>Chỉnh vùng</span>
+              </button>
+            )}
+          </div>
         </div>
 
-        {enableWatermark && (
-          <div className="mt-3 pt-2.5 border-t border-slate-800/80 space-y-2">
+        {enableWatermark && watermarkConfig.enabled !== false && (
+          <div className="mt-3 pt-2.5 border-t border-slate-800/80 space-y-2.5">
             <div className="flex items-center gap-2 text-xs">
               <span className="text-[10px] text-slate-400 shrink-0">Phương pháp:</span>
               <div className="grid grid-cols-3 gap-1.5 w-full">
@@ -416,6 +499,47 @@ export const AllInOneControls: React.FC<AllInOneControlsProps> = ({
               </div>
             </div>
 
+            {/* Target Clip Selection if multiple clips */}
+            {mergeItems.length > 1 && (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[11px] text-slate-400">
+                  <span>Áp dụng xóa logo trên:</span>
+                  <span className="text-amber-400 text-[10px] font-mono">
+                    {watermarkConfig.targetClipIndex === 'all' || watermarkConfig.targetClipIndex === undefined
+                      ? 'Tất cả video'
+                      : `Chỉ Clip #${Number(watermarkConfig.targetClipIndex) + 1}`}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  <button
+                    type="button"
+                    onClick={() => onChangeWatermarkConfig((p) => ({ ...p, targetClipIndex: 'all' }))}
+                    className={`px-2 py-0.5 rounded text-[10px] font-medium border transition ${
+                      watermarkConfig.targetClipIndex === 'all' || watermarkConfig.targetClipIndex === undefined
+                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                        : 'bg-slate-800 text-slate-400 border-slate-700'
+                    }`}
+                  >
+                    🌐 Tất cả video
+                  </button>
+                  {mergeItems.map((item, idx) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => onChangeWatermarkConfig((p) => ({ ...p, targetClipIndex: idx }))}
+                      className={`px-2 py-0.5 rounded text-[10px] font-medium border transition ${
+                        watermarkConfig.targetClipIndex === idx
+                          ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                          : 'bg-slate-800 text-slate-400 border-slate-700'
+                      }`}
+                    >
+                      #{idx + 1}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <p className="text-[10px] text-slate-500">
               Vùng áp dụng: Vùng góc dưới video{' '}
               <span className="text-amber-300 font-semibold">
@@ -423,6 +547,25 @@ export const AllInOneControls: React.FC<AllInOneControlsProps> = ({
                 {watermarkConfig.area.width.toFixed(0)}%, h: {watermarkConfig.area.height.toFixed(0)}%)
               </span>
             </p>
+          </div>
+        )}
+
+        {watermarkConfig.enabled === false && (
+          <div className="mt-2.5 p-2 bg-slate-950/80 rounded-xl border border-slate-800 flex items-center justify-between text-xs text-slate-400">
+            <span className="flex items-center gap-1.5 text-[11px]">
+              <XCircle className="w-3.5 h-3.5 text-slate-500" />
+              Đã ẩn xóa watermark (Video giữ nguyên gốc không xóa logo)
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setEnableWatermark(true);
+                onChangeWatermarkConfig((p) => ({ ...p, enabled: true }));
+              }}
+              className="text-[11px] text-amber-400 hover:underline font-semibold"
+            >
+              Bật lại
+            </button>
           </div>
         )}
       </div>
@@ -462,22 +605,127 @@ export const AllInOneControls: React.FC<AllInOneControlsProps> = ({
         </div>
 
         {enableMerge && (
-          <div className="mt-3 pt-2.5 border-t border-slate-800/80 space-y-2.5">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-[11px] text-slate-300 font-medium">
-                Chuyển cảnh thông minh (Auto Transitions):
-              </span>
-              <button
-                type="button"
-                onClick={() => onToggleAutoTransitions(!autoTransitions)}
-                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
-                  autoTransitions
-                    ? 'bg-indigo-600 text-white shadow-sm'
-                    : 'bg-slate-800 text-slate-400'
-                }`}
-              >
-                {autoTransitions ? 'BẬT (Mượt mà)' : 'TẮT'}
-              </button>
+          <div className="mt-3 pt-2.5 border-t border-slate-800/80 space-y-3">
+            {/* Transition Controls directly on All-in-One page */}
+            <div className="p-3 bg-slate-950/80 border border-slate-800/80 rounded-xl space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-indigo-300 flex items-center gap-1.5">
+                  <Wand2 className="w-3.5 h-3.5" />
+                  Hiệu ứng Chuyển Cảnh (Transitions):
+                </span>
+                <span className="text-[11px] font-mono text-indigo-400 bg-indigo-950/60 px-2 py-0.5 rounded border border-indigo-700/40">
+                  {ALL_TRANSITIONS.find((t) => t.id === selectedTransition)?.name || 'Fade'} ({transitionDuration}s)
+                </span>
+              </div>
+
+              {/* Quick Transition Badges */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                {[
+                  { id: 'auto', name: 'Auto Pool', icon: '🎲' },
+                  { id: 'fade', name: 'Fade', icon: '🌟' },
+                  { id: 'fadeblack', name: 'Fade Black', icon: '🖤' },
+                  { id: 'fadewhite', name: 'Fade White', icon: '🤍' },
+                  { id: 'dissolve', name: 'Dissolve', icon: '🌊' },
+                  { id: 'smoothleft', name: 'Smooth Left', icon: '⬅️' },
+                  { id: 'smoothright', name: 'Smooth Right', icon: '➡️' },
+                  { id: 'circlecrop', name: 'Circle Crop', icon: '⭕' },
+                ].map((tr) => {
+                  const isSel = selectedTransition === tr.id;
+                  return (
+                    <button
+                      key={tr.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedTransition(tr.id);
+                        onToggleAutoTransitions(tr.id === 'auto');
+                      }}
+                      className={`p-1.5 rounded-lg text-xs font-medium border flex items-center gap-1.5 transition-all ${
+                        isSel
+                          ? 'bg-indigo-600 text-white border-indigo-400 shadow-sm'
+                          : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <span>{tr.icon}</span>
+                      <span className="truncate">{tr.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Full Transition Dropdown Picker */}
+              <div className="flex items-center gap-2 pt-1 text-xs">
+                <span className="text-slate-400 text-[11px] shrink-0">Tất cả 30 kiểu:</span>
+                <select
+                  value={selectedTransition}
+                  onChange={(e) => {
+                    setSelectedTransition(e.target.value);
+                    onToggleAutoTransitions(e.target.value === 'auto');
+                  }}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:border-indigo-500 font-medium"
+                >
+                  <optgroup label="Tự động thông minh">
+                    <option value="auto">🎲 Auto Smart Pool (Đổi kiểu luân phiên)</option>
+                  </optgroup>
+                  <optgroup label="Kinh điển & Điện ảnh">
+                    <option value="fade">🌟 Fade (Mờ dần)</option>
+                    <option value="fadeblack">🖤 Fade Black (Mờ qua đen điện ảnh)</option>
+                    <option value="fadewhite">🤍 Fade White (Chớp sáng trắng)</option>
+                    <option value="dissolve">🌊 Dissolve (Hòa tan mềm mại)</option>
+                  </optgroup>
+                  <optgroup label="Lướt êm (Smooth)">
+                    <option value="smoothleft">⬅️ Smooth Left (Lướt êm sang trái)</option>
+                    <option value="smoothright">➡️ Smooth Right (Lướt êm sang phải)</option>
+                    <option value="smoothup">⬆️ Smooth Up (Lướt êm lên trên)</option>
+                    <option value="smoothdown">⬇️ Smooth Down (Lướt êm xuống dưới)</option>
+                  </optgroup>
+                  <optgroup label="Trượt cảnh (Slide)">
+                    <option value="slideleft">⏪ Slide Left (Trượt sang trái)</option>
+                    <option value="slideright">⏩ Slide Right (Trượt sang phải)</option>
+                    <option value="slideup">🔼 Slide Up (Trượt lên trên)</option>
+                    <option value="slidedown">🔽 Slide Down (Trượt xuống dưới)</option>
+                  </optgroup>
+                  <optgroup label="Gạt hình (Wipe)">
+                    <option value="wipeleft">🪟 Wipe Left (Gạt sang trái)</option>
+                    <option value="wiperight">🪟 Wipe Right (Gạt sang phải)</option>
+                    <option value="wipeup">🪟 Wipe Up (Gạt lên)</option>
+                    <option value="wipedown">🪟 Wipe Down (Gạt xuống)</option>
+                  </optgroup>
+                  <optgroup label="Hình học & Hiệu ứng đỉnh cao">
+                    <option value="circlecrop">⭕ Circle Crop (Thu tròn vào tâm)</option>
+                    <option value="circleopen">🔘 Circle Open (Mở rộng vòng tròn)</option>
+                    <option value="circleclose">🔴 Circle Close (Đóng vòng tròn)</option>
+                    <option value="rectcrop">🔲 Rect Crop (Thu khung chữ nhật)</option>
+                    <option value="zoomin">💥 Zoom In (Phóng to bùng nổ)</option>
+                    <option value="pixelize">👾 Pixelize (Hiệu ứng điểm ảnh Pixel)</option>
+                    <option value="radial">💫 Radial Clock (Quét quạt 360)</option>
+                    <option value="hblur">🌫️ H-Blur (Mờ chuyển động ngang)</option>
+                    <option value="squeezeh">↔️ Squeeze H (Co giãn ngang)</option>
+                    <option value="squeezev">↕️ Squeeze V (Co giãn dọc)</option>
+                    <option value="hlslice">🥢 H-Slice (Cắt lát sọc ngang)</option>
+                    <option value="distance">🌌 Distance (Chiều sâu 3D)</option>
+                    <option value="none">🎬 None (Cắt thẳng không chuyển cảnh)</option>
+                  </optgroup>
+                </select>
+              </div>
+
+              {/* Transition Duration Slider */}
+              <div className="flex items-center justify-between gap-3 pt-1 text-xs border-t border-slate-800/60">
+                <span className="text-slate-400 text-[11px] shrink-0">Thời lượng chuyển cảnh:</span>
+                <div className="flex items-center gap-2 flex-1 max-w-[200px]">
+                  <input
+                    type="range"
+                    min={0.3}
+                    max={1.5}
+                    step={0.05}
+                    value={transitionDuration}
+                    onChange={(e) => setTransitionDuration(Number(e.target.value))}
+                    className="w-full accent-indigo-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                  />
+                  <span className="font-mono text-indigo-300 text-xs font-bold w-10 text-right">
+                    {transitionDuration}s
+                  </span>
+                </div>
+              </div>
             </div>
 
             {/* Hidden file input for adding clips directly */}
