@@ -1,10 +1,11 @@
 import React from 'react';
-import { Film, Sparkles, Sliders, Info, Zap } from 'lucide-react';
+import { Film, Sparkles, Sliders, Info, Zap, Orbit } from 'lucide-react';
 import { OutputQuality } from '../../types/video';
+import type { AppTab } from '../../types/studio';
 
 interface HeaderProps {
-  activeTab: 'video' | 'ai';
-  onTabChange: (tab: 'video' | 'ai') => void;
+  activeTab: AppTab;
+  onTabChange: (tab: AppTab) => void;
   outputQuality: OutputQuality;
   onOpenQualityModal: () => void;
   onOpenAboutModal: () => void;
@@ -66,6 +67,18 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Sparkles className="w-3.5 h-3.5 text-amber-400" />
             <span>Nội Dung AI</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onTabChange('studio')}
+            className={`flex items-center gap-2 px-4 py-1.5 text-xs font-semibold rounded-xl transition-all whitespace-nowrap ${
+              activeTab === 'studio'
+                ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-md shadow-fuchsia-600/30'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+            }`}
+          >
+            <Orbit className="w-3.5 h-3.5 text-fuchsia-300" />
+            <span>Xưởng Nội Dung</span>
           </button>
         </nav>
 

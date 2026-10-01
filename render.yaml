@@ -8,3 +8,13 @@ services:
     envVars:
       - key: GEMINI_API_KEY
         sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: YOUTUBE_API_KEY
+        sync: false
+      - key: STUDIO_SHEET_ID
+        sync: false
+      - key: GOOGLE_SERVICE_ACCOUNT_EMAIL
+        sync: false
+      - key: GOOGLE_PRIVATE_KEY
+        sync: false

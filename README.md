@@ -23,6 +23,16 @@ Bộ công cụ tối ưu quy trình xử lý hậu kỳ video (khổ dọc 9:16
 - Chuyển âm thanh thành lời thoại (**Single-pass Speech-to-Text**) với mốc thời gian thực chính xác từng câu.
 - Phân tích bối cảnh video và tự động tạo tiêu đề, hook, mô tả, hashtag, CTA tối ưu theo từng nền tảng (TikTok, YouTube, Facebook, Reels).
 
+
+### 4. Xưởng Nội Dung (tab thứ 3)
+Các agent AI chạy ngay trên server web, tiến trình từng bước hiển thị trên mô hình vũ trụ 3D (Three.js):
+- **Chủ đề → Kịch bản:** chống trùng chủ đề với Google Sheet, tìm tin (Tavily), tổng hợp nghiên cứu, viết kịch bản 5–8 phút và prompt NotebookLM, lưu lại vào Sheet.
+- **Bản tin kinh tế:** 4 agent (Google, YouTube, TikTok, Facebook) và số liệu thị trường (tỷ giá USD lấy trực tiếp từ Vietcombank) chạy song song, sau đó viết bản tin khoảng 3.000 từ kèm 3 tiêu đề, câu thumbnail và 2 mô tả video.
+- **Xu hướng marketing:** quét trend 7 ngày, chấm điểm và chọn 5–6 xu hướng, viết quy trình áp dụng, liệt kê sai lầm cần tránh và gợi ý 3 video.
+
+Cấu hình trong `.env` (xem `.env.example`): `TAVILY_API_KEY` (bắt buộc), `YOUTUBE_API_KEY` (không bắt buộc), `STUDIO_SHEET_ID` và service account Google (dùng cho Sheet).
+Chỉ chạy khi dùng `server.ts` (máy local, Docker hoặc Render). Bản Vercel không hỗ trợ tab này.
+
 ---
 
 ## 🚀 Khởi Chạy Dự Án

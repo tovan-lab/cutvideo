@@ -12,3 +12,10 @@ coverage/
 *.avi
 temp/
 uploads/
+
+# Khóa Google service account
+secrets/
+*service-account*.json
+
+# Claude local config
+.claude/

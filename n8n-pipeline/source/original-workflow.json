@@ -1,0 +1,1065 @@
+{
+  "name": "Kinh Te Content Pipeline - Chat to NotebookLM Prompt",
+  "nodes": [
+    {
+      "parameters": {
+        "public": true,
+        "initialMessages": "Chào sếp Trọng, nhập chủ đề kinh tế bạn muốn làm video nhé!",
+        "options": {}
+      },
+      "id": "18dee43d-f285-41f5-91b2-b3d450a3f805",
+      "name": "When chat message received",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -992,
+        848
+      ],
+      "webhookId": "1f1b374a-c118-47c2-a61a-9981d13d6581"
+    },
+    {
+      "parameters": {
+        "jsCode": "const topic = ($json.chatInput || '').trim();\n\nif (!topic) {\n  throw new Error('Chủ đề không được để trống. Vui lòng nhập lại.');\n}\n\nreturn [{\n  json: {\n    candidate_topic: topic,\n    attempt: 0,\n    max_attempts: 5\n  }\n}];"
+      },
+      "id": "529d39c5-414e-41dd-aa47-b5a223b7631e",
+      "name": "Code: Init chủ đề",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1008,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "content_pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/REPLACE_WITH_YOUR_SHEET_ID/edit"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "content_pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/REPLACE_WITH_YOUR_SHEET_ID/edit#gid=0"
+        },
+        "options": {}
+      },
+      "id": "488b3954-3d0b-45ea-a261-6f81e1687589",
+      "name": "Get existing topics",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -960,
+        240
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "ypfXMrHIsRfFtrsm",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all();\nconst existingTopics = rows.map(r => r.json.topic).filter(Boolean);\nconst init = $('Code: Init chủ đề').first().json;\n\nreturn [{\n  json: {\n    candidate_topic: init.candidate_topic,\n    attempt: init.attempt,\n    max_attempts: init.max_attempts,\n    existing_topics: existingTopics\n  }\n}];"
+      },
+      "id": "b953df8e-7704-4bcb-8890-3025109cb8fe",
+      "name": "Code: Gộp danh sách chủ đề",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function normalize(str) {\n  return (str || '')\n    .toLowerCase()\n    .normalize('NFD')\n    .replace(/[\\u0300-\\u036f]/g, '')\n    .replace(/[^a-z0-9\\s]/g, '')\n    .trim();\n}\n\nconst data = $input.first().json;\nconst normCandidate = normalize(data.candidate_topic);\n\nconst isDuplicate = (data.existing_topics || []).some(t => {\n  const nt = normalize(t);\n  if (!nt || !normCandidate) return false;\n  return nt === normCandidate || nt.includes(normCandidate) || normCandidate.includes(nt);\n});\n\nreturn [{\n  json: {\n    ...data,\n    is_duplicate: isDuplicate\n  }\n}];"
+      },
+      "id": "1e760493-59e0-4475-bc16-6b8dd8425882",
+      "name": "Code: Kiểm tra trùng chủ đề",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ $json.is_duplicate }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "14c2ac8a-882b-4f99-be2d-6b39965b285c",
+      "name": "IF: Trùng chủ đề?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nreturn [{ json: { ...data, attempt: data.attempt + 1 } }];"
+      },
+      "id": "19763b62-5183-4d11-b626-360f7657ccd1",
+      "name": "Code: Tăng số lần thử",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ $json.attempt }}",
+              "rightValue": "={{ $json.max_attempts }}",
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3d481c6b-2a46-437f-9c73-233e56d86750",
+      "name": "IF: Vượt số lần thử?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        0,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    text: `Đã thử ${$json.attempt} lần nhưng chưa tìm được chủ đề mới không trùng lặp cho \\\"${$json.candidate_topic}\\\". Bạn vui lòng nhập một chủ đề khác nhé.`\n  }\n}];"
+      },
+      "id": "acdcc72e-3cce-4786-8fd0-f0647581a034",
+      "name": "Code: Soạn thông báo thất bại",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "message": "={{ $json.text }}",
+        "options": {}
+      },
+      "id": "47e57439-d870-42ad-963b-26ca9d9b74bc",
+      "name": "Chat: Báo không tìm được chủ đề",
+      "type": "@n8n/n8n-nodes-langchain.chat",
+      "typeVersion": 1.3,
+      "position": [
+        480,
+        560
+      ],
+      "webhookId": "a00aad68-b939-4c79-9ce0-91c7dfd289f4"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.5-flash",
+          "mode": "list",
+          "cachedResultName": "models/gemini-2.5-flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Bạn là biên tập viên nội dung kênh YouTube kinh tế học tiếng Việt.\n\nChủ đề đang xét (đã bị trùng hoặc quá giống chủ đề cũ): {{ $json.candidate_topic }}\n\nDanh sách các chủ đề ĐÃ LÀM RỒI (tuyệt đối không được trùng hoặc quá giống):\n{{ $json.existing_topics.join(', ') }}\n\nNhiệm vụ: Đề xuất 1 chủ đề kinh tế MỚI, liên quan đến lĩnh vực kinh tế học, có tính thời sự, thu hút người xem phổ thông, và KHÁC BIỆT rõ ràng với toàn bộ danh sách trên (không phải bản diễn giải khác của cùng 1 chủ đề).\n\nYêu cầu output: CHỈ trả về JSON hợp lệ, không giải thích, không markdown code fence.\nĐịnh dạng:\n{\n  \"new_topic\": \"tên chủ đề mới, ngắn gọn, rõ ràng\"\n}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {
+          "temperature": 0.8
+        }
+      },
+      "id": "10929db4-5c12-4562-98da-5764008be351",
+      "name": "AI: Đề xuất chủ đề mới",
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        -96,
+        720
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000,
+      "credentials": {
+        "googlePalmApi": {
+          "id": "lFX1QsXU7A2WFNRr",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "let inputItem = $input.first().json;\nlet raw = '';\n\nif (inputItem.content && inputItem.content.parts) {\n  raw = inputItem.content.parts[0].text;\n} else if (inputItem.text) {\n  raw = inputItem.text;\n} else if (typeof inputItem === 'string') {\n  raw = inputItem;\n} else {\n  raw = JSON.stringify(inputItem);\n}\n\nlet cleaned = raw.replace(/```json/gi, '').replace(/```/g, '').trim();\nlet parsed;\ntry {\n  parsed = JSON.parse(cleaned);\n} catch (e) {\n  throw new Error('AI trả JSON đề xuất chủ đề không hợp lệ: ' + e.message);\n}\n\nconst prev = $('Code: Kiểm tra trùng chủ đề').first().json;\n\nreturn [{\n  json: {\n    candidate_topic: parsed.new_topic || prev.candidate_topic,\n    attempt: prev.attempt,\n    max_attempts: prev.max_attempts,\n    existing_topics: prev.existing_topics\n  }\n}];"
+      },
+      "id": "0c1683e7-7031-4bf4-bb64-7ff0068727f0",
+      "name": "Code: Đọc chủ đề mới từ AI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tavily.com/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"query\": \"={{ $json.candidate_topic }} kinh tế mới nhất\", \"search_depth\": \"advanced\", \"topic\": \"news\", \"max_results\": 8, \"include_answer\": true}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "3f292c40-f174-491b-a715-214b57fee4d9",
+      "name": "Web Search: Tìm thông tin mới nhất",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "uc7yarJAl0JfP7He",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const resp = $input.first().json;\nconst results = resp.results || [];\n\nconst formatted = results.map((r, i) =>\n  `[Nguồn ${i + 1}] ${r.title}\\nURL: ${r.url}\\nNgày: ${r.published_date || 'không rõ'}\\nTóm tắt: ${r.content}\\n`\n).join('\\n---\\n');\n\nconst topic = $('Code: Kiểm tra trùng chủ đề').first().json.candidate_topic;\n\nreturn [{\n  json: {\n    topic: topic,\n    search_answer: resp.answer || '',\n    search_results_text: formatted || 'Không tìm thấy kết quả tìm kiếm.',\n    raw_sources: results.map(r => ({ title: r.title, url: r.url, published_date: r.published_date || null }))\n  }\n}];"
+      },
+      "id": "a776e98c-8776-4022-b793-eaab38790469",
+      "name": "Code: Định dạng kết quả tìm kiếm",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.5-flash",
+          "mode": "list",
+          "cachedResultName": "models/gemini-2.5-flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Bạn là chuyên gia nghiên cứu kinh tế, tổng hợp thông tin cho kênh YouTube kinh tế học tiếng Việt.\n\nChủ đề: {{ $json.topic }}\n\nKết quả tìm kiếm mới nhất (nguồn thực tế, không được bịa thêm số liệu ngoài đây):\n{{ $json.search_results_text }}\n\nTóm tắt nhanh từ công cụ search: {{ $json.search_answer }}\n\nNhiệm vụ: Tổng hợp thành dữ liệu nghiên cứu có cấu trúc, CHỈ dựa trên thông tin có trong các nguồn ở trên. Nếu một số liệu không có trong nguồn, đừng tự bịa ra.\n\nYêu cầu output: CHỈ trả về JSON hợp lệ, không giải thích, không markdown code fence.\nĐịnh dạng:\n{\n  \"summary\": \"tóm tắt tổng quan 3-5 câu về chủ đề, dựa trên nguồn\",\n  \"key_points\": [\"luận điểm chính 1\", \"luận điểm chính 2\", \"...\"],\n  \"data_points\": [\"số liệu/thống kê cụ thể kèm nguồn/ngày nếu có\", \"...\"],\n  \"sources\": [{\"title\": \"tên nguồn\", \"url\": \"link nguồn\"}]\n}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "id": "48c23ed4-0907-4af3-9a0b-bbccce572553",
+      "name": "AI: Tổng hợp nghiên cứu",
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        480,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000,
+      "credentials": {
+        "googlePalmApi": {
+          "id": "lFX1QsXU7A2WFNRr",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "let inputItem = $input.first().json;\nlet raw = '';\n\nif (inputItem.content && inputItem.content.parts) {\n  raw = inputItem.content.parts[0].text;\n} else if (inputItem.text) {\n  raw = inputItem.text;\n} else if (typeof inputItem === 'string') {\n  raw = inputItem;\n} else {\n  raw = JSON.stringify(inputItem);\n}\n\nlet cleaned = raw.replace(/```json/gi, '').replace(/```/g, '').trim();\nlet research;\ntry {\n  research = JSON.parse(cleaned);\n} catch (e) {\n  throw new Error('AI trả JSON nghiên cứu không hợp lệ: ' + e.message);\n}\n\nconst searchNode = $('Code: Định dạng kết quả tìm kiếm').first().json;\nconst topic = searchNode.topic;\nconst currentDate = new Date().toISOString().split('T')[0];\n\nconst sources = Array.isArray(research.sources) && research.sources.length\n  ? research.sources\n  : searchNode.raw_sources;\n\nreturn [{\n  json: {\n    topic: topic,\n    summary: research.summary || '',\n    key_points: Array.isArray(research.key_points) ? research.key_points : [],\n    data_points: Array.isArray(research.data_points) ? research.data_points : [],\n    sources: sources,\n    research_data: JSON.stringify({\n      summary: research.summary || '',\n      key_points: research.key_points || [],\n      data_points: research.data_points || []\n    }),\n    sources_text: sources.map(s => `${s.title}: ${s.url}`).join(' | '),\n    status: 'researched',\n    date_created: currentDate,\n    date_updated: currentDate\n  }\n}];"
+      },
+      "id": "533bd815-94e1-46fd-9c8e-ec573e178b8b",
+      "name": "Code: Kiểm tra dữ liệu nghiên cứu",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "content_pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/REPLACE_WITH_YOUR_SHEET_ID/edit"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "content_pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/REPLACE_WITH_YOUR_SHEET_ID/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "topic": "={{ $json.topic }}",
+            "research_data": "={{ $json.research_data }}",
+            "sources": "={{ $json.sources_text }}",
+            "script": "",
+            "prompt": "",
+            "status": "={{ $json.status }}",
+            "date_created": "={{ $json.date_created }}",
+            "date_updated": "={{ $json.date_updated }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "topic",
+              "displayName": "topic",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "research_data",
+              "displayName": "research_data",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sources",
+              "displayName": "sources",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "script",
+              "displayName": "script",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "prompt",
+              "displayName": "prompt",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "date_created",
+              "displayName": "date_created",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "date_updated",
+              "displayName": "date_updated",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "cc081b40-f514-4b04-9105-e7902a478986",
+      "name": "Append row: dữ liệu nghiên cứu",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        960,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "ypfXMrHIsRfFtrsm",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.5-flash",
+          "mode": "list",
+          "cachedResultName": "models/gemini-2.5-flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Bạn là biên kịch video thuyết trình cho kênh YouTube kinh tế học tiếng Việt, phong cách dễ hiểu, có dẫn chứng số liệu, phù hợp video 5-8 phút.\n\nChủ đề: {{ $json.topic }}\n\nDữ liệu nghiên cứu (CHỈ dùng thông tin này, không bịa thêm số liệu):\nTóm tắt: {{ $json.summary }}\nLuận điểm chính: {{ $json.key_points.join('; ') }}\nSố liệu: {{ $json.data_points.join('; ') }}\nNguồn: {{ $json.sources_text }}\n\nNhiệm vụ: Viết kịch bản thuyết trình hoàn chỉnh gồm: mở đầu gây chú ý (hook), 3-5 phần nội dung chính (mỗi phần có tiêu đề nhỏ, nội dung thuyết minh, số liệu dẫn chứng kèm nguồn), phần kết luận, và lời kêu gọi hành động (like/subscribe/để lại ý kiến).\n\nYêu cầu output: CHỈ trả về JSON hợp lệ, không giải thích, không markdown code fence.\nĐịnh dạng:\n{\n  \"title\": \"tiêu đề video\",\n  \"hook\": \"đoạn mở đầu gây chú ý (2-3 câu)\",\n  \"sections\": [\n    {\"heading\": \"tiêu đề phần\", \"content\": \"nội dung thuyết minh đầy đủ của phần này\", \"data_cited\": \"số liệu/nguồn được trích dẫn trong phần này\"}\n  ],\n  \"conclusion\": \"đoạn kết luận\",\n  \"call_to_action\": \"lời kêu gọi hành động\"\n}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {
+          "temperature": 0.6
+        }
+      },
+      "id": "04b18f04-b9ba-4e66-b6e3-3da4eb9420bd",
+      "name": "AI: Viết kịch bản thuyết trình",
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        832,
+        560
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000,
+      "credentials": {
+        "googlePalmApi": {
+          "id": "lFX1QsXU7A2WFNRr",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "let inputItem = $input.first().json;\nlet raw = '';\n\nif (inputItem.content && inputItem.content.parts) {\n  raw = inputItem.content.parts[0].text;\n} else if (inputItem.text) {\n  raw = inputItem.text;\n} else if (typeof inputItem === 'string') {\n  raw = inputItem;\n} else {\n  raw = JSON.stringify(inputItem);\n}\n\nlet cleaned = raw.replace(/```json/gi, '').replace(/```/g, '').trim();\nlet script;\ntry {\n  script = JSON.parse(cleaned);\n} catch (e) {\n  throw new Error('AI trả JSON kịch bản không hợp lệ: ' + e.message);\n}\n\nif (!Array.isArray(script.sections) || script.sections.length === 0) {\n  throw new Error('Kịch bản thiếu phần nội dung (sections).');\n}\n\nconst topic = $('Code: Kiểm tra dữ liệu nghiên cứu').first().json.topic;\nconst currentDate = new Date().toISOString().split('T')[0];\n\nconst scriptText = [\n  `TIÊU ĐỀ: ${script.title || topic}`,\n  `MỞ ĐẦU: ${script.hook || ''}`,\n  ...script.sections.map((s, i) => `PHẦN ${i + 1} - ${s.heading}:\\n${s.content}\\n(Dẫn chứng: ${s.data_cited || ''})`),\n  `KẾT LUẬN: ${script.conclusion || ''}`,\n  `CTA: ${script.call_to_action || ''}`\n].join('\\n\\n');\n\nreturn [{\n  json: {\n    topic: topic,\n    script_json: script,\n    script_text: scriptText,\n    status: 'scripted',\n    date_updated: currentDate\n  }\n}];"
+      },
+      "id": "7fd00646-2a77-49dc-b07d-ad257d4ce679",
+      "name": "Code: Kiểm tra kịch bản",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "content_pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/REPLACE_WITH_YOUR_SHEET_ID/edit"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "content_pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/REPLACE_WITH_YOUR_SHEET_ID/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "topic": "={{ $json.topic }}",
+            "script": "={{ $json.script_text }}",
+            "status": "={{ $json.status }}",
+            "date_updated": "={{ $json.date_updated }}"
+          },
+          "matchingColumns": [
+            "topic"
+          ],
+          "schema": [
+            {
+              "id": "topic",
+              "displayName": "topic",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "script",
+              "displayName": "script",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "date_updated",
+              "displayName": "date_updated",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "3173325f-c95c-4c68-8517-7365debd8cdd",
+      "name": "Update row: kịch bản",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1328,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "ypfXMrHIsRfFtrsm",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.5-flash",
+          "mode": "list",
+          "cachedResultName": "models/gemini-2.5-flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Bạn là chuyên gia viết prompt cho NotebookLM (tính năng \"Video Overview\" / \"Audio Overview\" tùy chỉnh theo hướng dẫn của người dùng).\n\nKịch bản video đã hoàn chỉnh:\n{{ $json.script_text }}\n\nNhiệm vụ: Viết 1 đoạn HƯỚNG DẪN (prompt) bằng tiếng Việt để dán vào ô \"Customize\" của NotebookLM khi tạo Video Overview, sao cho video do NotebookLM tạo ra bám sát đúng nội dung, cấu trúc, giọng điệu và thứ tự các phần của kịch bản trên. Prompt cần nêu rõ: đối tượng khán giả, giọng điệu mong muốn, cấu trúc theo đúng các phần (mở đầu - nội dung - kết luận - CTA), những số liệu/luận điểm bắt buộc phải nhắc tới, và độ dài mong muốn.\n\nYêu cầu output: CHỈ trả về JSON hợp lệ, không giải thích, không markdown code fence.\nĐịnh dạng:\n{\n  \"notebooklm_prompt\": \"toàn bộ đoạn hướng dẫn hoàn chỉnh, sẵn sàng copy-paste\"\n}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {
+          "temperature": 0.4
+        }
+      },
+      "id": "d75320b9-3635-40a5-83be-412d6eae8758",
+      "name": "AI: Viết prompt cho NotebookLM",
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1600,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000,
+      "credentials": {
+        "googlePalmApi": {
+          "id": "lFX1QsXU7A2WFNRr",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "let inputItem = $input.first().json;\nlet raw = '';\n\nif (inputItem.content && inputItem.content.parts) {\n  raw = inputItem.content.parts[0].text;\n} else if (inputItem.text) {\n  raw = inputItem.text;\n} else if (typeof inputItem === 'string') {\n  raw = inputItem;\n} else {\n  raw = JSON.stringify(inputItem);\n}\n\nlet cleaned = raw.replace(/```json/gi, '').replace(/```/g, '').trim();\nlet parsed;\ntry {\n  parsed = JSON.parse(cleaned);\n} catch (e) {\n  throw new Error('AI trả JSON prompt không hợp lệ: ' + e.message);\n}\n\nconst prevNode = $('Code: Kiểm tra kịch bản').first().json;\nconst currentDate = new Date().toISOString().split('T')[0];\n\nreturn [{\n  json: {\n    topic: prevNode.topic,\n    notebooklm_prompt: parsed.notebooklm_prompt || '',\n    status: 'ready',\n    date_updated: currentDate\n  }\n}];"
+      },
+      "id": "3b6a3a0e-387c-499f-bf51-21316588f2c9",
+      "name": "Code: Kiểm tra prompt NotebookLM",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1808,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "content_pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/REPLACE_WITH_YOUR_SHEET_ID/edit"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "content_pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/REPLACE_WITH_YOUR_SHEET_ID/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "topic": "={{ $json.topic }}",
+            "prompt": "={{ $json.notebooklm_prompt }}",
+            "status": "={{ $json.status }}",
+            "date_updated": "={{ $json.date_updated }}"
+          },
+          "matchingColumns": [
+            "topic"
+          ],
+          "schema": [
+            {
+              "id": "topic",
+              "displayName": "topic",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "prompt",
+              "displayName": "prompt",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "date_updated",
+              "displayName": "date_updated",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "32051847-c0d3-4c9a-8528-8bfb960e7d66",
+      "name": "Update row: prompt NotebookLM",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1808,
+        672
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "ypfXMrHIsRfFtrsm",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nreturn [{\n  json: {\n    text: `✅ Đã hoàn tất pipeline cho chủ đề: \"${data.topic}\"\\n\\nTrạng thái: ${data.status}\\nKịch bản và prompt NotebookLM đã được ghi vào Google Sheet. Vào sheet, mở cột \"prompt\" và copy sang NotebookLM để tạo video thuyết trình nhé.`\n  }\n}];"
+      },
+      "id": "876c0c4b-dc6b-4ab1-a5eb-e5bbb9e725b8",
+      "name": "Code: Soạn thông báo hoàn tất",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1136,
+        928
+      ]
+    },
+    {
+      "parameters": {
+        "message": "={{ $json.text }}",
+        "options": {}
+      },
+      "id": "b7c0b1ac-fe4d-4a7a-a216-8b46c8531461",
+      "name": "Chat: Báo hoàn tất",
+      "type": "@n8n/n8n-nodes-langchain.chat",
+      "typeVersion": 1.3,
+      "position": [
+        512,
+        832
+      ],
+      "webhookId": "c5c0e181-1d1c-4e2e-bf0c-a83d41f49ade"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Code: Init chủ đề",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Init chủ đề": {
+      "main": [
+        [
+          {
+            "node": "Get existing topics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get existing topics": {
+      "main": [
+        [
+          {
+            "node": "Code: Gộp danh sách chủ đề",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Gộp danh sách chủ đề": {
+      "main": [
+        [
+          {
+            "node": "Code: Kiểm tra trùng chủ đề",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Kiểm tra trùng chủ đề": {
+      "main": [
+        [
+          {
+            "node": "IF: Trùng chủ đề?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Trùng chủ đề?": {
+      "main": [
+        [
+          {
+            "node": "Code: Tăng số lần thử",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Web Search: Tìm thông tin mới nhất",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Tăng số lần thử": {
+      "main": [
+        [
+          {
+            "node": "IF: Vượt số lần thử?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Vượt số lần thử?": {
+      "main": [
+        [
+          {
+            "node": "Code: Soạn thông báo thất bại",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI: Đề xuất chủ đề mới",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Soạn thông báo thất bại": {
+      "main": [
+        [
+          {
+            "node": "Chat: Báo không tìm được chủ đề",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI: Đề xuất chủ đề mới": {
+      "main": [
+        [
+          {
+            "node": "Code: Đọc chủ đề mới từ AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Đọc chủ đề mới từ AI": {
+      "main": [
+        [
+          {
+            "node": "Code: Kiểm tra trùng chủ đề",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Web Search: Tìm thông tin mới nhất": {
+      "main": [
+        [
+          {
+            "node": "Code: Định dạng kết quả tìm kiếm",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Định dạng kết quả tìm kiếm": {
+      "main": [
+        [
+          {
+            "node": "AI: Tổng hợp nghiên cứu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI: Tổng hợp nghiên cứu": {
+      "main": [
+        [
+          {
+            "node": "Code: Kiểm tra dữ liệu nghiên cứu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Kiểm tra dữ liệu nghiên cứu": {
+      "main": [
+        [
+          {
+            "node": "Append row: dữ liệu nghiên cứu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row: dữ liệu nghiên cứu": {
+      "main": [
+        [
+          {
+            "node": "AI: Viết kịch bản thuyết trình",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI: Viết kịch bản thuyết trình": {
+      "main": [
+        [
+          {
+            "node": "Code: Kiểm tra kịch bản",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Kiểm tra kịch bản": {
+      "main": [
+        [
+          {
+            "node": "Update row: kịch bản",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update row: kịch bản": {
+      "main": [
+        [
+          {
+            "node": "AI: Viết prompt cho NotebookLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI: Viết prompt cho NotebookLM": {
+      "main": [
+        [
+          {
+            "node": "Code: Kiểm tra prompt NotebookLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Kiểm tra prompt NotebookLM": {
+      "main": [
+        [
+          {
+            "node": "Update row: prompt NotebookLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update row: prompt NotebookLM": {
+      "main": [
+        [
+          {
+            "node": "Code: Soạn thông báo hoàn tất",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Soạn thông báo hoàn tất": {
+      "main": [
+        [
+          {
+            "node": "Chat: Báo hoàn tất",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "3a641005-2643-45ae-b070-ad403ac52d12",
+  "meta": {
+    "instanceId": "eeae188c5f68688caffcbc67a331c740be45c114d7fdf4db484fb05aa6e9123f"
+  },
+  "nodeGroups": [],
+  "id": "ZYwlekImV5kkpL8X",
+  "tags": []
+}
