@@ -50,6 +50,11 @@ export interface ServerMergeOptions {
   transitions?: ServerTransition[];
   autoTransitions?: boolean;
   quality?: '1080p' | '720p' | '480p' | 'original';
+  clipTrims?: Array<{
+    clipIndex: number;
+    startSec: number;
+    endSec: number;
+  }>;
 }
 
 export interface ServerTextItem {
@@ -273,9 +278,13 @@ export class ServerFFmpegService {
       '-c:v',
       'libx264',
       '-preset',
-      'fast',
+      'ultrafast',
       '-crf',
-      '18',
+      '22',
+      '-threads',
+      '0',
+      '-tune',
+      'fastdecode',
       '-c:a',
       'copy',
       '-avoid_negative_ts',
@@ -449,9 +458,13 @@ export class ServerFFmpegService {
       '-c:v',
       'libx264',
       '-preset',
-      'fast',
+      'ultrafast',
       '-crf',
-      '18',
+      '22',
+      '-threads',
+      '0',
+      '-tune',
+      'fastdecode',
       '-pix_fmt',
       'yuv420p',
       '-c:a',
@@ -502,16 +515,43 @@ export class ServerFFmpegService {
     duration: number;
     sizeBytes: number;
     metadata: VideoProbeData;
+    reencodeStatus: 'no_reencode' | 'reencoded';
+    engineUsed: string;
   }> {
-    const { inputPaths, outputPath, transitions = [], autoTransitions = false, quality = 'original' } = options;
+    const {
+      inputPaths,
+      outputPath,
+      transitions = [],
+      autoTransitions = false,
+      quality = 'original',
+      clipTrims = [],
+    } = options;
+
     if (inputPaths.length === 0) {
       throw new Error('Không có video nào để ghép.');
     }
+
     if (inputPaths.length === 1) {
-      await execFileAsync(this.ffmpegBin, ['-i', inputPaths[0], '-c', 'copy', '-y', outputPath]);
+      const ct = clipTrims.find((t) => t.clipIndex === 0);
+      const args = ['-i', inputPaths[0]];
+      if (ct && ct.startSec > 0) {
+        args.unshift('-ss', ct.startSec.toString());
+      }
+      if (ct && ct.endSec > 0) {
+        args.push('-to', (ct.endSec - (ct.startSec || 0)).toString());
+      }
+      args.push('-c', 'copy', '-avoid_negative_ts', 'make_zero', '-y', outputPath);
+      await execFileAsync(this.ffmpegBin, args);
       const stats = await fs.stat(outputPath);
       const probe = await this.probeVideo(outputPath);
-      return { outputPath, duration: probe.duration, sizeBytes: stats.size, metadata: probe };
+      return {
+        outputPath,
+        duration: probe.duration,
+        sizeBytes: stats.size,
+        metadata: probe,
+        reencodeStatus: 'no_reencode',
+        engineUsed: 'native_ffmpeg',
+      };
     }
 
     // 1. Probe all input videos
@@ -520,10 +560,79 @@ export class ServerFFmpegService {
       probes.push(await this.probeVideo(p));
     }
 
+    const firstProbe = probes[0];
+    const hasTransitions =
+      Boolean(autoTransitions) ||
+      transitions.some((t) => t && t.type && t.type !== 'none' && (t.duration || 0) > 0.05);
+
+    const hasClipTrims = Boolean(
+      clipTrims &&
+        clipTrims.some(
+          (ct) =>
+            ct.startSec > 0 ||
+            (ct.endSec > 0 && ct.endSec < (probes[ct.clipIndex]?.duration || 999999))
+        )
+    );
+
+    const sameResolution = probes.every(
+      (p) =>
+        p.width === firstProbe.width &&
+        p.height === firstProbe.height &&
+        p.fps === firstProbe.fps &&
+        p.hasAudio === firstProbe.hasAudio
+    );
+
+    const isStreamCopyCapable = !hasTransitions && !hasClipTrims && sameResolution && quality === 'original';
+
+    // PATH 1: Instant Lossless Concat Stream Copy (takes ~0.1s!)
+    if (isStreamCopyCapable) {
+      const listFile = path.join(
+        path.dirname(outputPath),
+        `concat_${Date.now()}_${Math.random().toString(36).substring(7)}.txt`
+      );
+      const fileEntries = inputPaths.map((p) => `file '${p.replace(/\\/g, '/')}'`).join('\n');
+      await fs.writeFile(listFile, fileEntries, 'utf8');
+
+      try {
+        await execFileAsync(this.ffmpegBin, [
+          '-f',
+          'concat',
+          '-safe',
+          '0',
+          '-i',
+          listFile,
+          '-c',
+          'copy',
+          '-movflags',
+          '+faststart',
+          '-y',
+          outputPath,
+        ]);
+      } finally {
+        await fs.unlink(listFile).catch(() => {});
+      }
+
+      const outStats = await fs.stat(outputPath);
+      const outProbe = await this.probeVideo(outputPath).catch(() => ({
+        ...firstProbe,
+        duration: probes.reduce((acc, p) => acc + p.duration, 0),
+        sizeBytes: outStats.size,
+      }));
+
+      return {
+        outputPath,
+        duration: outProbe.duration,
+        sizeBytes: outStats.size,
+        metadata: outProbe,
+        reencodeStatus: 'no_reencode',
+        engineUsed: 'native_ffmpeg',
+      };
+    }
+
     // Determine target dimensions
-    const isPortrait = probes[0].height > probes[0].width;
-    let targetWidth = probes[0].width;
-    let targetHeight = probes[0].height;
+    const isPortrait = firstProbe.height > firstProbe.width;
+    let targetWidth = firstProbe.width;
+    let targetHeight = firstProbe.height;
 
     if (quality === '1080p') {
       targetWidth = isPortrait ? 1080 : 1920;
@@ -538,36 +647,109 @@ export class ServerFFmpegService {
     targetWidth = targetWidth % 2 === 0 ? targetWidth : targetWidth - 1;
     targetHeight = targetHeight % 2 === 0 ? targetHeight : targetHeight - 1;
 
-    // Transition styles pool for auto smart transitions
-    const autoPool = ['smoothleft', 'dissolve', 'fade', 'smoothright', 'zoomin', 'fadeblack'];
+    // PATH 2: Fast Concat Filter without heavy xfade matrix (5x - 10x faster!)
+    if (!hasTransitions) {
+      const args: string[] = [];
+      const filterParts: string[] = [];
+      const concatInputs: string[] = [];
 
-    // 2. Build input arguments and complex filtergraph
+      for (let i = 0; i < inputPaths.length; i++) {
+        const ct = clipTrims.find((t) => t.clipIndex === i);
+        if (ct && ct.startSec > 0) {
+          args.push('-ss', ct.startSec.toString());
+        }
+        if (ct && ct.endSec > 0 && ct.endSec < probes[i].duration) {
+          args.push('-to', ct.endSec.toString());
+        }
+        args.push('-i', inputPaths[i]);
+
+        filterParts.push(
+          `[${i}:v]scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30[v${i}]`
+        );
+        concatInputs.push(`[v${i}]`);
+
+        if (probes[i].hasAudio) {
+          filterParts.push(`[${i}:a]aformat=sample_rates=48000:channel_layouts=stereo,aresample=async=1[a${i}]`);
+          concatInputs.push(`[a${i}]`);
+        } else {
+          const d = ct ? (ct.endSec - ct.startSec) : (probes[i].duration || 5);
+          filterParts.push(`anullsrc=channel_layout=stereo:sample_rate=48000:d=${d}[a${i}]`);
+          concatInputs.push(`[a${i}]`);
+        }
+      }
+
+      const filterComplex = `${filterParts.join(';')};${concatInputs.join('')}concat=n=${inputPaths.length}:v=1:a=1[outv][outa]`;
+
+      args.push(
+        '-filter_complex',
+        filterComplex,
+        '-map',
+        '[outv]',
+        '-map',
+        '[outa]',
+        '-c:v',
+        'libx264',
+        '-preset',
+        'ultrafast',
+        '-crf',
+        '23',
+        '-threads',
+        '0',
+        '-tune',
+        'fastdecode',
+        '-pix_fmt',
+        'yuv420p',
+        '-c:a',
+        'aac',
+        '-b:a',
+        '192k',
+        '-movflags',
+        '+faststart',
+        '-y',
+        outputPath
+      );
+
+      await execFileAsync(this.ffmpegBin, args);
+      const outStats = await fs.stat(outputPath);
+      const outProbe = await this.probeVideo(outputPath);
+
+      return {
+        outputPath,
+        duration: outProbe.duration,
+        sizeBytes: outStats.size,
+        metadata: outProbe,
+        reencodeStatus: 'reencoded',
+        engineUsed: 'native_ffmpeg',
+      };
+    }
+
+    // PATH 3: Chained xfade + acrossfade with Ultrafast encoding
+    const autoPool = ['smoothleft', 'dissolve', 'fade', 'smoothright', 'zoomin', 'fadeblack'];
     const args: string[] = [];
     const filterComplex: string[] = [];
 
-    // Add inputs
     for (let i = 0; i < inputPaths.length; i++) {
+      const ct = clipTrims.find((t) => t.clipIndex === i);
+      if (ct && ct.startSec > 0) {
+        args.push('-ss', ct.startSec.toString());
+      }
+      if (ct && ct.endSec > 0 && ct.endSec < probes[i].duration) {
+        args.push('-to', ct.endSec.toString());
+      }
       args.push('-i', inputPaths[i]);
-    }
 
-    // Video streams pre-processing: scale to fit box with black padding, set fps=30, sar=1
-    for (let i = 0; i < inputPaths.length; i++) {
       filterComplex.push(
         `[${i}:v]scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30[v${i}]`
       );
-    }
 
-    // Audio streams pre-processing: ensure 48kHz stereo, generate silence if video has no audio
-    for (let i = 0; i < inputPaths.length; i++) {
       if (probes[i].hasAudio) {
         filterComplex.push(`[${i}:a]aformat=sample_rates=48000:channel_layouts=stereo,aresample=async=1[a${i}]`);
       } else {
-        const d = probes[i].duration || 5;
+        const d = ct ? (ct.endSec - ct.startSec) : (probes[i].duration || 5);
         filterComplex.push(`anullsrc=channel_layout=stereo:sample_rate=48000:d=${d}[a${i}]`);
       }
     }
 
-    // 3. Chain xfade and acrossfade
     let currentOffset = 0;
     let lastVideoLabel = 'v0';
     let lastAudioLabel = 'a0';
@@ -589,10 +771,10 @@ export class ServerFFmpegService {
 
       if (transType === 'none') {
         transType = 'fade';
-        transDur = 0.01;
+        transDur = 0.05;
       }
 
-      transDur = Math.max(0.01, Math.min(transDur, prevDuration / 2, nextDuration / 2, 2.0));
+      transDur = Math.max(0.05, Math.min(transDur, prevDuration / 2, nextDuration / 2, 2.0));
 
       if (i === 1) {
         currentOffset = prevDuration - transDur;
@@ -625,9 +807,13 @@ export class ServerFFmpegService {
       '-c:v',
       'libx264',
       '-preset',
-      'fast',
+      'ultrafast',
       '-crf',
-      '19',
+      '23',
+      '-threads',
+      '0',
+      '-tune',
+      'fastdecode',
       '-pix_fmt',
       'yuv420p',
       '-c:a',
@@ -649,6 +835,8 @@ export class ServerFFmpegService {
       duration: outProbe.duration,
       sizeBytes: outStats.size,
       metadata: outProbe,
+      reencodeStatus: 'reencoded',
+      engineUsed: 'native_ffmpeg',
     };
   }
 
@@ -792,9 +980,13 @@ export class ServerFFmpegService {
       '-c:v',
       'libx264',
       '-preset',
-      'fast',
+      'ultrafast',
       '-crf',
-      '18',
+      '22',
+      '-threads',
+      '0',
+      '-tune',
+      'fastdecode',
       '-pix_fmt',
       'yuv420p',
       '-c:a',
@@ -1043,55 +1235,83 @@ export class ServerFFmpegService {
           }
         }
 
-        let currentOffset = 0;
+        let totalEstDuration = probes[0].duration || 5;
         let lastVideoLabel = 'v0';
         let lastAudioLabel = 'a0';
-        let totalEstDuration = probes[0].duration || 5;
         const clipOffsets: number[] = [0];
 
-        for (let i = 1; i < inputPaths.length; i++) {
-          const prevDuration = probes[i - 1].duration || 5;
-          const nextDuration = probes[i].duration || 5;
-          let transType = 'fade';
-          let transDur = merge?.transitionDuration || 0.75;
-
-          if (merge?.autoTransitions) {
-            transType = autoPool[(i - 1) % autoPool.length];
-            transDur = 0.75;
-          } else if (merge?.transitions && merge.transitions[i - 1]) {
-            transType = merge.transitions[i - 1].type || 'fade';
-            transDur = merge.transitions[i - 1].duration || transDur;
-          } else if (merge?.defaultTransition) {
-            transType = merge.defaultTransition;
-          }
-
-          if (transType === 'none') {
-            transType = 'fade';
-            transDur = 0.01;
-          }
-
-          transDur = Math.max(0.01, Math.min(transDur, prevDuration / 2, nextDuration / 2, 2.0));
-          if (i === 1) {
-            currentOffset = prevDuration - transDur;
-          } else {
-            currentOffset = currentOffset + prevDuration - transDur;
-          }
-          currentOffset = Math.max(0.1, Number(currentOffset.toFixed(2)));
-          clipOffsets.push(currentOffset);
-          totalEstDuration = currentOffset + nextDuration;
-
-          const outV = `vm${i}`;
-          const outA = `am${i}`;
-
-          filterComplex.push(
-            `[${lastVideoLabel}][v${i}]xfade=transition=${transType}:duration=${transDur}:offset=${currentOffset}[${outV}]`
-          );
-          filterComplex.push(
-            `[${lastAudioLabel}][a${i}]acrossfade=d=${transDur}:c1=tri:c2=tri[${outA}]`
+        const hasTransitions =
+          Boolean(merge?.autoTransitions) ||
+          Boolean(
+            merge?.transitions &&
+              merge.transitions.some(
+                (t) => t && t.type && t.type !== 'none' && (t.duration || 0) > 0.05
+              )
           );
 
-          lastVideoLabel = outV;
-          lastAudioLabel = outA;
+        if (!hasTransitions) {
+          // Fast direct concat without complex xfade matrix
+          const concatInputs: string[] = [];
+          for (let i = 0; i < inputPaths.length; i++) {
+            concatInputs.push(`[v${i}][a${i}]`);
+          }
+          filterComplex.push(`${concatInputs.join('')}concat=n=${inputPaths.length}:v=1:a=1[vm_concat][am_concat]`);
+          lastVideoLabel = 'vm_concat';
+          lastAudioLabel = 'am_concat';
+          totalEstDuration = probes.reduce((acc, p) => acc + p.duration, 0);
+
+          let accDur = 0;
+          for (let i = 1; i < inputPaths.length; i++) {
+            accDur += probes[i - 1].duration || 5;
+            clipOffsets.push(accDur);
+          }
+        } else {
+          // Chained xfade + acrossfade
+          let currentOffset = 0;
+          for (let i = 1; i < inputPaths.length; i++) {
+            const prevDuration = probes[i - 1].duration || 5;
+            const nextDuration = probes[i].duration || 5;
+            let transType = 'fade';
+            let transDur = merge?.transitionDuration || 0.75;
+
+            if (merge?.autoTransitions) {
+              transType = autoPool[(i - 1) % autoPool.length];
+              transDur = 0.75;
+            } else if (merge?.transitions && merge.transitions[i - 1]) {
+              transType = merge.transitions[i - 1].type || 'fade';
+              transDur = merge.transitions[i - 1].duration || transDur;
+            } else if (merge?.defaultTransition) {
+              transType = merge.defaultTransition;
+            }
+
+            if (transType === 'none') {
+              transType = 'fade';
+              transDur = 0.05;
+            }
+
+            transDur = Math.max(0.05, Math.min(transDur, prevDuration / 2, nextDuration / 2, 2.0));
+            if (i === 1) {
+              currentOffset = prevDuration - transDur;
+            } else {
+              currentOffset = currentOffset + prevDuration - transDur;
+            }
+            currentOffset = Math.max(0.1, Number(currentOffset.toFixed(2)));
+            clipOffsets.push(currentOffset);
+            totalEstDuration = currentOffset + nextDuration;
+
+            const outV = `vm${i}`;
+            const outA = `am${i}`;
+
+            filterComplex.push(
+              `[${lastVideoLabel}][v${i}]xfade=transition=${transType}:duration=${transDur}:offset=${currentOffset}[${outV}]`
+            );
+            filterComplex.push(
+              `[${lastAudioLabel}][a${i}]acrossfade=d=${transDur}:c1=tri:c2=tri[${outA}]`
+            );
+
+            lastVideoLabel = outV;
+            lastAudioLabel = outA;
+          }
         }
 
         // Determine watermark time constraint in merged timeline
@@ -1143,9 +1363,13 @@ export class ServerFFmpegService {
           '-c:v',
           'libx264',
           '-preset',
-          'fast',
+          'ultrafast',
           '-crf',
-          '19',
+          '23',
+          '-threads',
+          '0',
+          '-tune',
+          'fastdecode',
           '-pix_fmt',
           'yuv420p',
           '-c:a',
@@ -1209,9 +1433,13 @@ export class ServerFFmpegService {
           '-c:v',
           'libx264',
           '-preset',
-          'fast',
+          'ultrafast',
           '-crf',
-          '18',
+          '22',
+          '-threads',
+          '0',
+          '-tune',
+          'fastdecode',
           '-pix_fmt',
           'yuv420p',
           '-c:a',

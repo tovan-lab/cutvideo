@@ -1288,7 +1288,25 @@ class HybridVideoProcessor implements IVideoProcessor {
 
         const options = {
           autoTransitions: Boolean(params.autoTransitions),
-          transitions: params.items.map((it) => it.transition || { type: 'fade', duration: 0.75 }),
+          transitions: params.items.map((it) =>
+            it.transition
+              ? it.transition
+              : params.autoTransitions
+              ? { type: 'fade', duration: 0.75 }
+              : { type: 'none', duration: 0 }
+          ),
+          clipTrims: params.items
+            .map((it, idx) => ({
+              clipIndex: idx,
+              startSec: it.trimConfig?.startTime ?? 0,
+              endSec: it.trimConfig?.endTime ?? it.video.metadata.duration ?? 0,
+            }))
+            .filter(
+              (ct) =>
+                ct.startSec > 0 ||
+                (ct.endSec > 0 &&
+                  ct.endSec < (params.items[ct.clipIndex]?.video.metadata.duration || 999999))
+            ),
           quality: params.quality,
         };
         formData.append('options', JSON.stringify(options));
@@ -1296,7 +1314,9 @@ class HybridVideoProcessor implements IVideoProcessor {
         onProgress?.({
           stage: 'encoding',
           percent: 45,
-          message: 'Native FFmpeg đang render hiệu ứng chuyển cảnh siêu tốc...',
+          message: Boolean(params.autoTransitions)
+            ? 'Native FFmpeg đang render hiệu ứng chuyển cảnh siêu tốc...'
+            : 'Native FFmpeg đang ghép video siêu tốc (Fast Stream / Concat)...',
         });
 
         const res = await fetch('/api/video/merge', {
@@ -1316,6 +1336,10 @@ class HybridVideoProcessor implements IVideoProcessor {
           message: 'Đang nhận luồng video hoàn tất...',
         });
 
+        const reencodeStatus = (res.headers.get('X-Reencode-Status') as 'no_reencode' | 'reencoded') || 'reencoded';
+        const engineUsed = (res.headers.get('X-Engine-Used') as any) || 'native_ffmpeg';
+        const isStreamCopy = reencodeStatus === 'no_reencode';
+
         const outBlob = await res.blob();
         const outUrl = URL.createObjectURL(outBlob);
         const metadata = await this.browserProcessor.probeVideo(outBlob);
@@ -1324,15 +1348,15 @@ class HybridVideoProcessor implements IVideoProcessor {
           success: true,
           videoUrl: outUrl,
           videoName: `merged_${params.items.length}_clips.mp4`,
-          downloadName: `video_merged_xfade.mp4`,
+          downloadName: isStreamCopy ? 'video_merged_streamcopy.mp4' : 'video_merged.mp4',
           duration: metadata.duration,
           sizeBytes: outBlob.size,
           quality: params.quality,
           operation: 'merge',
           metadata,
           blob: outBlob,
-          engineUsed: 'native_ffmpeg',
-          reencodeStatus: 'reencoded',
+          engineUsed,
+          reencodeStatus,
         };
       }
     } catch (nativeErr: unknown) {

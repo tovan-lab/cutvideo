@@ -1,5 +1,16 @@
-import React from 'react';
-import { Download, CheckCircle2, Sparkles, ArrowLeft, RefreshCw, Film } from 'lucide-react';
+import React, { useState } from 'react';
+import {
+  Download,
+  CheckCircle2,
+  Sparkles,
+  ArrowLeft,
+  RefreshCw,
+  Film,
+  ExternalLink,
+  Copy,
+  Check,
+  Loader2,
+} from 'lucide-react';
 import { VideoOperationResult } from '../../types/video';
 
 interface VideoResultProps {
@@ -13,6 +24,9 @@ export const VideoResult: React.FC<VideoResultProps> = ({
   onReset,
   onJumpToAI,
 }) => {
+  const [downloadState, setDownloadState] = useState<'idle' | 'downloading' | 'success'>('idle');
+  const [copiedLink, setCopiedLink] = useState(false);
+
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
     const s = Math.floor(secs % 60);
@@ -21,13 +35,76 @@ export const VideoResult: React.FC<VideoResultProps> = ({
 
   const sizeMb = (result.sizeBytes / (1024 * 1024)).toFixed(1);
 
-  const handleDownload = () => {
-    const a = document.createElement('a');
-    a.href = result.videoUrl;
-    a.download = result.downloadName || result.videoName || 'video_output.mp4';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+  const getCleanFilename = (): string => {
+    let name = result.downloadName || result.videoName || 'video_output.mp4';
+    // Clean unsafe characters for Windows/Mac/Linux
+    name = name.replace(/[<>:"/\\|?*]/g, '_').trim();
+    if (!name.toLowerCase().endsWith('.mp4')) {
+      name += '.mp4';
+    }
+    return name;
+  };
+
+  const handleDownload = async () => {
+    if (downloadState === 'downloading') return;
+    try {
+      setDownloadState('downloading');
+      const filename = getCleanFilename();
+
+      let downloadUrl = result.videoUrl;
+      let temporaryBlobUrl: string | null = null;
+
+      if (result.blob) {
+        temporaryBlobUrl = URL.createObjectURL(result.blob);
+        downloadUrl = temporaryBlobUrl;
+      } else if (result.videoUrl.startsWith('http') || result.videoUrl.startsWith('/')) {
+        // Fetch to blob to ensure true download trigger across all browsers
+        try {
+          const res = await fetch(result.videoUrl);
+          if (res.ok) {
+            const blob = await res.blob();
+            temporaryBlobUrl = URL.createObjectURL(blob);
+            downloadUrl = temporaryBlobUrl;
+          }
+        } catch (fetchErr) {
+          console.warn('Direct blob fetch failed, falling back to direct URL link:', fetchErr);
+        }
+      }
+
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = filename;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+
+      setTimeout(() => {
+        if (a.parentNode) {
+          a.parentNode.removeChild(a);
+        }
+        if (temporaryBlobUrl) {
+          URL.revokeObjectURL(temporaryBlobUrl);
+        }
+      }, 5000);
+
+      setDownloadState('success');
+      setTimeout(() => setDownloadState('idle'), 3000);
+    } catch (err) {
+      console.error('Download video error:', err);
+      // Fallback: open in new tab
+      window.open(result.videoUrl, '_blank');
+      setDownloadState('idle');
+    }
+  };
+
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(result.videoUrl);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2500);
+    } catch {
+      setCopiedLink(false);
+    }
   };
 
   return (
@@ -43,20 +120,63 @@ export const VideoResult: React.FC<VideoResultProps> = ({
               Xử lý video thật hoàn tất!
             </h4>
             <p className="text-xs text-emerald-400/80 mt-0.5">
-              File mới đã được mã hóa thành công ({result.metadata.width}×{result.metadata.height} · {formatTime(result.duration)})
+              File mới đã sẵn sàng ({result.metadata.width}×{result.metadata.height} · {formatTime(result.duration)})
             </p>
           </div>
         </div>
 
-        {/* Primary Download Button */}
-        <button
-          type="button"
-          onClick={handleDownload}
-          className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl shadow-lg shadow-emerald-900/30 transition-all hover:scale-[1.02] active:scale-[0.98]"
-        >
-          <Download className="w-4 h-4" />
-          <span>Tải video ({sizeMb} MB)</span>
-        </button>
+        {/* Action Buttons: Primary Download + Auxiliaries */}
+        <div className="flex items-center gap-2">
+          {/* Open in new tab preview */}
+          <a
+            href={result.videoUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800 transition-colors"
+            title="Mở video trong tab mới"
+          >
+            <ExternalLink className="w-4 h-4" />
+          </a>
+
+          {/* Copy link button */}
+          <button
+            type="button"
+            onClick={handleCopyLink}
+            className="p-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800 transition-colors"
+            title="Sao chép liên kết video"
+          >
+            {copiedLink ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+          </button>
+
+          {/* Primary Download Button */}
+          <button
+            type="button"
+            onClick={handleDownload}
+            disabled={downloadState === 'downloading'}
+            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-xl shadow-lg transition-all hover:scale-[1.02] active:scale-[0.98] ${
+              downloadState === 'success'
+                ? 'bg-emerald-500 text-white shadow-emerald-900/40'
+                : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/30'
+            }`}
+          >
+            {downloadState === 'downloading' ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Đang chuẩn bị tải...</span>
+              </>
+            ) : downloadState === 'success' ? (
+              <>
+                <Check className="w-4 h-4" />
+                <span>Đã bắt đầu tải về!</span>
+              </>
+            ) : (
+              <>
+                <Download className="w-4 h-4" />
+                <span>Tải video ({sizeMb} MB)</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Result Video Preview */}

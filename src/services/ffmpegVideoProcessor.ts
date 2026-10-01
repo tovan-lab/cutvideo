@@ -356,7 +356,13 @@ export class FFmpegVideoProcessor {
         it.video.metadata.hasAudio === first.metadata.hasAudio
     );
 
-    const isStreamCopyConcat = sameResolution && quality === 'original';
+    const hasTrim = items.some(
+      (it) =>
+        it.trimConfig &&
+        (it.trimConfig.startTime > 0 ||
+          (it.trimConfig.endTime > 0 && it.trimConfig.endTime < (it.video.metadata.duration || 999999)))
+    );
+    const isStreamCopyConcat = !hasTrim && sameResolution && quality === 'original';
     const outputName = `merged_${Date.now()}.mp4`;
     const inputNames: string[] = [];
 
@@ -414,6 +420,13 @@ export class FFmpegVideoProcessor {
         const concatInputs: string[] = [];
 
         for (let i = 0; i < items.length; i++) {
+          const tc = items[i].trimConfig;
+          if (tc && tc.startTime > 0) {
+            inputsArgs.push('-ss', tc.startTime.toString());
+          }
+          if (tc && tc.endTime > 0 && tc.endTime < (items[i].video.metadata.duration || 999999)) {
+            inputsArgs.push('-to', tc.endTime.toString());
+          }
           inputsArgs.push('-i', inputNames[i]);
           filterParts.push(
             `[${i}:v]scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2,setsar=1[v${i}]`
@@ -423,7 +436,8 @@ export class FFmpegVideoProcessor {
             concatInputs.push(`[${i}:a]`);
           } else {
             // Generate silent audio stream for clips without audio
-            filterParts.push(`aevalsrc=0:d=${items[i].video.metadata.duration || 5}[a${i}]`);
+            const dur = tc ? (tc.endTime - tc.startTime) : (items[i].video.metadata.duration || 5);
+            filterParts.push(`aevalsrc=0:d=${dur}[a${i}]`);
             concatInputs.push(`[a${i}]`);
           }
         }

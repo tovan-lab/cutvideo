@@ -134,11 +134,11 @@ videoRouter.post(
   diskUpload.array('videos', 25),
   async (req: Request, res: Response) => {
     const uploadedFiles = req.files as Express.Multer.File[];
-    if (!uploadedFiles || uploadedFiles.length < 2) {
+    if (!uploadedFiles || uploadedFiles.length === 0) {
       return res.status(400).json({
         success: false,
-        error: 'NEED_AT_LEAST_2_VIDEOS',
-        message: 'Cần tối thiểu 2 video để thực hiện ghép.',
+        error: 'NO_FILES',
+        message: 'Cần ít nhất 1 video để thực hiện ghép hoặc xử lý.',
       });
     }
 
@@ -155,9 +155,13 @@ videoRouter.post(
         transitions: options.transitions,
         autoTransitions: Boolean(options.autoTransitions),
         quality: options.quality || 'original',
+        clipTrims: options.clipTrims,
       });
 
       res.setHeader('Content-Type', 'video/mp4');
+      res.setHeader('Content-Disposition', 'attachment; filename="video_merged.mp4"');
+      res.setHeader('X-Reencode-Status', result.reencodeStatus || 'reencoded');
+      res.setHeader('X-Engine-Used', result.engineUsed || 'native_ffmpeg');
       res.setHeader('X-Duration', result.duration.toString());
       res.setHeader('X-Size-Bytes', result.sizeBytes.toString());
 

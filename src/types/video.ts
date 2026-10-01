@@ -140,11 +140,6 @@ export interface TrimConfig {
   mode?: TrimMode;
 }
 
-export interface MergeItem {
-  video: VideoItem;
-  order: number;
-  trimConfig?: TrimConfig;
-}
 
 export interface BoundingBox {
   x: number; // percentage 0-100
