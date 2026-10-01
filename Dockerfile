@@ -6,8 +6,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certi
 
 WORKDIR /app
 
-COPY package.json ./
-RUN npm install --no-audit --no-fund
+COPY package.json package-lock.json* ./
+RUN npm install --no-audit --no-fund --legacy-peer-deps
 
 COPY . .
 RUN npm run build
